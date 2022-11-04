@@ -2,6 +2,14 @@
 
 A simple dotfiles manager written in Rust.
 
+```yaml
+profile:
+  ~ignore:
+    - abc
+    - def
+  ~path: "xx"
+```
+
 ## ⚖️ License
 
 Licensed under either of
