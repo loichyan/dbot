@@ -37,6 +37,7 @@ name = "dbot"
 version = "0.0.0"
 dependencies = [
  "globset",
+ "indexmap",
  "serde",
  "serde_yaml",
  "tracing",

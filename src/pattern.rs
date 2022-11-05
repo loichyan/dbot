@@ -2,7 +2,7 @@ mod de;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PatternSetBuilder(Vec<Pattern>);
 
 pub struct PatternSet(GlobSet);
@@ -15,22 +15,13 @@ impl PatternSetBuilder {
         }
         builder.build().map(PatternSet).ok()
     }
-}
 
-impl IntoIterator for PatternSetBuilder {
-    type IntoIter = <Vec<Pattern> as IntoIterator>::IntoIter;
-    type Item = Pattern;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+    pub fn extend(&self, other: &PatternSetBuilder) -> PatternSetBuilder {
+        Self(Vec::from_iter(
+            self.0.iter().cloned().chain(other.0.iter().cloned()),
+        ))
     }
 }
 
-impl Extend<Pattern> for PatternSetBuilder {
-    fn extend<T: IntoIterator<Item = Pattern>>(&mut self, iter: T) {
-        self.0.extend(iter)
-    }
-}
-
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Pattern(Glob);

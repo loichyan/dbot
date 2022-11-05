@@ -1,10 +1,36 @@
-use super::{AttrLink, ProfileAttr, ProfileNode};
+use super::{path_only_node, AttrLink, NormalizedPath, ProfileAttr, ProfileNode};
 use serde::{
     de::{Error as DeError, Visitor},
     Deserialize,
 };
-use std::fmt;
+use std::{fmt, rc::Rc};
 use tracing::{instrument, warn};
+
+struct NormalizedPathVisitor;
+
+impl<'de> Visitor<'de> for NormalizedPathVisitor {
+    type Value = NormalizedPath;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "a path")
+    }
+
+    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
+    where
+        E: DeError,
+    {
+        Ok(NormalizedPath::new(v.as_ref()))
+    }
+}
+
+impl<'de> Deserialize<'de> for NormalizedPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_str(NormalizedPathVisitor)
+    }
+}
 
 struct AttrLinkVisitor;
 
@@ -47,16 +73,6 @@ impl<'de> Deserialize<'de> for AttrLink {
 
 struct ProfileNodeVistor;
 
-fn path_only_node(from: String) -> ProfileNode {
-    ProfileNode {
-        attr: ProfileAttr {
-            from: Some(from),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
-}
-
 impl<'de> Visitor<'de> for ProfileNodeVistor {
     type Value = ProfileNode;
 
@@ -66,16 +82,9 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
 
     fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
     where
-        E: serde::de::Error,
+        E: DeError,
     {
-        self.visit_string(v.to_owned())
-    }
-
-    fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(path_only_node(v))
+        NormalizedPathVisitor.visit_str(v).map(path_only_node)
     }
 
     #[instrument(skip_all)]
@@ -91,14 +100,14 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
                     "from" => attr.from = Some(map.next_value()?),
                     "link" => attr.link = Some(map.next_value()?),
                     "tmpl" => attr.tmpl = Some(map.next_value()?),
-                    "ignore" => attr.ignore = Some(map.next_value()?),
+                    "ignore" => attr.ignore = Some(Rc::new(map.next_value()?)),
                     _ => {
                         warn!("Undefined attribute '{}'", key);
                         map.next_value::<serde_yaml::Value>()?;
                     }
                 }
             } else {
-                let dest = key.to_owned();
+                let dest = NormalizedPathVisitor.visit_str(key)?;
                 let node = map.next_value::<ProfileNode>()?;
                 children.push((dest, node));
             }
@@ -148,7 +157,7 @@ mod tests {
         )
         .unwrap();
         let attr = ProfileAttr {
-            from: "path/to/source".to_owned().into(),
+            from: Some("path/to/source".into()),
             link: AttrLink::True.into(),
             tmpl: true.into(),
             ignore: <_>::default(),
@@ -167,12 +176,12 @@ mod tests {
             "#,
         )
         .unwrap();
-        let child1 = path_only_node("path/to/source1".to_owned());
-        let child2 = path_only_node("path/to/source2".to_owned());
+        let child1 = path_only_node("path/to/source1");
+        let child2 = path_only_node("path/to/source2");
         let expected = ProfileNode {
             children: vec![
-                ("target1".to_owned(), child1),
-                ("target2".to_owned(), child2),
+                ("target1".to_owned().into(), child1),
+                ("target2".to_owned().into(), child2),
             ],
             ..Default::default()
         };
