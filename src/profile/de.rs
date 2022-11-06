@@ -19,7 +19,7 @@ impl<'de> Visitor<'de> for NormalizedPathVisitor {
     where
         E: DeError,
     {
-        Ok(NormalizedPath::new(v.as_ref()))
+        NormalizedPath::new(v.as_ref()).map_err(E::custom)
     }
 }
 
