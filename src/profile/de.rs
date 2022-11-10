@@ -1,35 +1,13 @@
-use super::{path_only_node, AttrLink, NormalizedPath, ProfileAttr, ProfileNode};
+use super::{normalize_path, path_only_node, AttrLink, ProfileAttr, ProfileNode};
 use serde::{
     de::{Error as DeError, Visitor},
     Deserialize,
 };
-use std::{fmt, rc::Rc};
+use std::{fmt, path::PathBuf, rc::Rc};
 use tracing::{instrument, warn};
 
-struct NormalizedPathVisitor;
-
-impl<'de> Visitor<'de> for NormalizedPathVisitor {
-    type Value = NormalizedPath;
-
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "a path")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: DeError,
-    {
-        NormalizedPath::new(v.as_ref()).map_err(E::custom)
-    }
-}
-
-impl<'de> Deserialize<'de> for NormalizedPath {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_str(NormalizedPathVisitor)
-    }
+fn deserialize_path_normalized<E: DeError>(v: &str) -> Result<PathBuf, E> {
+    normalize_path(v.as_ref()).map_err(E::custom)
 }
 
 struct AttrLinkVisitor;
@@ -84,7 +62,7 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
     where
         E: DeError,
     {
-        NormalizedPathVisitor.visit_str(v).map(path_only_node)
+        deserialize_path_normalized(v.as_ref()).map(path_only_node)
     }
 
     #[instrument(skip_all)]
@@ -97,7 +75,7 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
         while let Some(key) = map.next_key::<&str>()? {
             if key.starts_with("~") {
                 match &key[1..] {
-                    "from" => attr.from = Some(map.next_value()?),
+                    "from" => attr.from = Some(deserialize_path_normalized(map.next_value()?)?),
                     "link" => attr.link = Some(map.next_value()?),
                     "tmpl" => attr.tmpl = Some(map.next_value()?),
                     "ignore" => attr.ignore = Some(Rc::new(map.next_value()?)),
@@ -107,7 +85,7 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
                     }
                 }
             } else {
-                let dest = NormalizedPathVisitor.visit_str(key)?;
+                let dest = deserialize_path_normalized(key)?;
                 let node = map.next_value::<ProfileNode>()?;
                 children.push((dest, node));
             }
@@ -127,6 +105,8 @@ impl<'de> Deserialize<'de> for ProfileNode {
 
 #[cfg(test)]
 mod tests {
+    use crate::profile::path_only_attr;
+
     use super::*;
 
     #[test]
@@ -143,6 +123,22 @@ mod tests {
             serde_yaml::from_str::<AttrLink>("recursive").unwrap(),
             AttrLink::Recursive
         );
+    }
+
+    #[test]
+    fn normalized_path_attributes() {
+        let node = serde_yaml::from_str::<ProfileNode>(
+            r#"
+            ~from: skip/../path/to/root
+            /path/to/./target1: ../path/to/source1
+            "#,
+        )
+        .unwrap();
+        let expected = ProfileNode {
+            attr: path_only_attr("path/to/root"),
+            children: vec![("path/to/target1".into(), path_only_node("path/to/source1"))],
+        };
+        assert_eq!(node, expected);
     }
 
     #[test]

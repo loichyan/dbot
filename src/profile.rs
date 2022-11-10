@@ -1,9 +1,9 @@
 mod de;
 
 use crate::pattern::PatternSetBuilder;
-use indexmap::IndexMap;
 use serde::Deserialize;
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     path::{Component, Path, PathBuf},
     rc::Rc,
@@ -16,11 +16,17 @@ pub struct Profile {
 }
 
 impl Profile {
-    pub fn collect_entries(mut self) -> IndexMap<PathBuf, ProfileAttr> {
+    pub fn into_entries(mut self) -> HashMap<PathBuf, ProfileAttr> {
         let ComponentNode { attr, children } = self.build_component_tree();
-        let mut collect_to = IndexMap::default();
+        let mut collect_to = HashMap::default();
         for (child_target, child_node) in children {
-            collect_entries_from_node(child_target.into(), child_node, &attr, &mut collect_to);
+            collect_entries_from_node(
+                child_target.as_ref(),
+                child_node,
+                "".as_ref(),
+                &attr,
+                &mut collect_to,
+            );
         }
         collect_to
     }
@@ -35,41 +41,47 @@ impl Profile {
         let node = &mut self.root;
         let mut tree = ComponentNode::default();
         for (child_target, child_node) in node.children.iter_mut() {
-            update_component_tree(&child_target.0, child_node, &mut tree);
+            update_component_tree(child_target, child_node, &mut tree);
         }
         tree
     }
 }
 
 fn collect_entries_from_node(
-    target: PathBuf,
+    target: &Path,
     node: ComponentNode<'_>,
+    parent_target: &Path,
     parent: &ProfileAttr,
-    collect_to: &mut IndexMap<PathBuf, ProfileAttr>,
+    collect_to: &mut HashMap<PathBuf, ProfileAttr>,
 ) {
     let ComponentNode { mut attr, children } = node;
-    attr = inherit_attr(attr, parent);
+    attr = inherit_attr(target, attr, parent);
+    let target = parent_target.join(target);
     for (child_target, child_node) in children {
-        collect_entries_from_node(target.join(child_target), child_node, &attr, collect_to);
+        collect_entries_from_node(
+            child_target.as_ref(),
+            child_node,
+            &target,
+            &attr,
+            collect_to,
+        );
     }
     // Ignore entries without 'from' attribute.
     if attr.from.is_none() {
         return;
     }
-    let attr = if let Some(prev_attr) = collect_to.get(&target) {
-        // Inherit existing attributes.
-        inherit_attr(attr, prev_attr)
-    } else {
-        attr
-    };
     collect_to.insert(target, attr);
 }
 
 // TODO: check attributes which are impossible to compile
-fn inherit_attr(attr: ProfileAttr, parent: &ProfileAttr) -> ProfileAttr {
+fn inherit_attr(target: &Path, attr: ProfileAttr, parent: &ProfileAttr) -> ProfileAttr {
     // Attributes to keep.
-    // TODO: join with the target path of this node
-    let from = attr.from;
+    let from = attr
+        .from
+        // By default, if a child under a node that provides `from` attribute
+        // doesn't define its own `from` attribute, it will be treated a child
+        // of the directory whose parent `from` path it is.
+        .or_else(|| parent.from.as_ref().map(|parent| parent.join(&target)));
     // Attributes to override.
     // TODO: a template or linked path cannot have children
     let link = attr.link.or(parent.link);
@@ -102,7 +114,7 @@ fn update_component_tree<'a>(
     }
     merge_attr(&mut tree.attr, std::mem::take(&mut node.attr));
     for (child_target, child_node) in node.children.iter_mut() {
-        update_component_tree(&child_target.0, child_node, tree);
+        update_component_tree(child_target, child_node, tree);
     }
 }
 
@@ -124,7 +136,7 @@ fn merge_attr(dest: &mut ProfileAttr, src: ProfileAttr) {
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProfileAttr {
-    pub from: Option<NormalizedPath>,
+    pub from: Option<PathBuf>,
     pub link: Option<AttrLink>,
     pub tmpl: Option<bool>,
     pub ignore: Option<Rc<PatternSetBuilder>>,
@@ -141,12 +153,12 @@ pub enum AttrLink {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct ProfileNode {
     attr: ProfileAttr,
-    children: Vec<(NormalizedPath, ProfileNode)>,
+    children: Vec<(PathBuf, ProfileNode)>,
 }
 
 fn path_only_attr<T>(from: T) -> ProfileAttr
 where
-    T: Into<NormalizedPath>,
+    T: Into<PathBuf>,
 {
     ProfileAttr {
         from: Some(from.into()),
@@ -156,7 +168,7 @@ where
 
 fn path_only_node<T>(from: T) -> ProfileNode
 where
-    T: Into<NormalizedPath>,
+    T: Into<PathBuf>,
 {
     ProfileNode {
         attr: path_only_attr(from.into()),
@@ -164,39 +176,28 @@ where
     }
 }
 
+fn normalize_path(path: &Path) -> Result<PathBuf, &'static str> {
+    let mut buf = PathBuf::new();
+    for compo in path.components() {
+        match compo {
+            Component::CurDir | Component::RootDir => (),
+            Component::ParentDir => {
+                buf.pop();
+            }
+            Component::Prefix(_) => return Err("a path can't start with a prefix"),
+            _ => buf.push(compo),
+        }
+    }
+    if buf.as_os_str().is_empty() {
+        return Err("a normalized path must not be empty");
+    }
+    Ok(buf)
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 struct ComponentNode<'a> {
     attr: ProfileAttr,
-    children: IndexMap<&'a OsStr, ComponentNode<'a>>,
-}
-
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct NormalizedPath(PathBuf);
-
-impl<T> From<T> for NormalizedPath
-where
-    T: Into<PathBuf>,
-{
-    fn from(t: T) -> Self {
-        Self(t.into())
-    }
-}
-
-impl NormalizedPath {
-    fn new(path: &Path) -> Result<Self, &'static str> {
-        let mut buf = PathBuf::new();
-        for compo in path.components() {
-            match compo {
-                Component::CurDir | Component::RootDir => (),
-                Component::ParentDir => {
-                    buf.pop();
-                }
-                Component::Prefix(_) => return Err("a path can't start with a prefix"),
-                _ => buf.push(compo),
-            }
-        }
-        Ok(Self(buf))
-    }
+    children: HashMap<&'a OsStr, ComponentNode<'a>>,
 }
 
 #[cfg(test)]
@@ -204,13 +205,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_path() {
+    fn create_normalized_path() {
         assert_eq!(
             PathBuf::from("abc/def"),
-            NormalizedPath::new("./../skip/../abc/./skip/../def".as_ref())
-                .unwrap()
-                .0
-        )
+            normalize_path("skip/../abc/def".as_ref()).unwrap()
+        );
+        assert_eq!(
+            PathBuf::from("abc/def"),
+            normalize_path("/abc/def".as_ref()).unwrap()
+        );
+        assert_eq!(
+            PathBuf::from("abc/def"),
+            normalize_path("abc/./def".as_ref()).unwrap()
+        );
     }
 
     fn create_component_node<'a, I>(entries: I) -> ComponentNode<'a>
@@ -229,7 +236,7 @@ mod tests {
 
     fn path_only_component_node<'a, T>(from: T) -> ComponentNode<'a>
     where
-        T: Into<NormalizedPath>,
+        T: Into<PathBuf>,
     {
         ComponentNode {
             attr: path_only_attr(from),
@@ -313,14 +320,45 @@ mod tests {
             "#,
         )
         .unwrap();
-        let expected = vec![
+        let expected = [
             ("path/to/target1", "path/to/source1"),
             ("path/to/target2", "path/to/source2"),
             ("path/to/target3", "path/to/source3"),
         ]
         .into_iter()
         .map(|(target, source)| (PathBuf::from(target), path_only_attr(source)))
-        .collect::<IndexMap<_, _>>();
-        assert_eq!(profile.collect_entries(), expected);
+        .collect::<HashMap<_, _>>();
+        assert_eq!(profile.into_entries(), expected);
+    }
+
+    #[test]
+    fn inherited_from_attribute() {
+        let entries = serde_yaml::from_str::<Profile>(
+            r#"
+            path/to/target:
+              ~from: path/to/source
+              child1: path/to/child1
+              child2:
+                ~link: true
+            "#,
+        )
+        .unwrap()
+        .into_entries();
+        let mut expected = [
+            ("path/to/target", "path/to/source"),
+            ("path/to/target/child1", "path/to/child1"),
+        ]
+        .into_iter()
+        .map(|(target, source)| (PathBuf::from(target), path_only_attr(source)))
+        .collect::<HashMap<_, _>>();
+        expected.insert(
+            "path/to/target/child2".into(),
+            ProfileAttr {
+                from: Some("path/to/source/child2".into()),
+                link: Some(AttrLink::True),
+                ..Default::default()
+            },
+        );
+        assert_eq!(entries, expected);
     }
 }

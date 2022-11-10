@@ -4,7 +4,6 @@ version = "0.0.0"
 edition = "2021"
 
 [dependencies]
-indexmap = "1.9"
 globset = "0.4"
 serde_yaml = "0.9"
 tracing = "0.1"
