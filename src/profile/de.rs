@@ -1,4 +1,4 @@
-use super::{normalize_path, path_only_node, ProfileAttr, ProfileNode};
+use super::{normalize_path, path_only_node, ProfileAttrBuilder, ProfileNode};
 use serde::{
     de::{Error as DeError, Visitor},
     Deserialize,
@@ -31,7 +31,7 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
     where
         A: serde::de::MapAccess<'de>,
     {
-        let mut attr = ProfileAttr::default();
+        let mut attr = ProfileAttrBuilder::default();
         let mut children = Vec::with_capacity(map.size_hint().unwrap_or_default());
         while let Some(key) = map.next_key::<&str>()? {
             if let Some(attr_str) = key.strip_prefix('~') {
@@ -96,7 +96,7 @@ mod tests {
             "#,
         )
         .unwrap();
-        let attr = ProfileAttr {
+        let attr = ProfileAttrBuilder {
             source: Some("path/to/source".into()),
             ty: Some(AttrType::Link),
             recursive: Some(true),

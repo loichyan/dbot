@@ -5,7 +5,18 @@ use globset::{Glob, GlobSet, GlobSetBuilder};
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PatternSetBuilder(Vec<Pattern>);
 
+#[derive(Clone, Debug, Default)]
 pub struct PatternSet(GlobSet);
+
+#[cfg(test)]
+impl PartialEq for PatternSet {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+#[cfg(test)]
+impl Eq for PatternSet {}
 
 impl PatternSetBuilder {
     pub fn build(self) -> Option<PatternSet> {
