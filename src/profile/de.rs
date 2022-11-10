@@ -1,4 +1,4 @@
-use super::{normalize_path, path_only_node, AttrLink, ProfileAttr, ProfileNode};
+use super::{normalize_path, path_only_node, ProfileAttr, ProfileNode};
 use serde::{
     de::{Error as DeError, Visitor},
     Deserialize,
@@ -8,45 +8,6 @@ use tracing::{instrument, warn};
 
 fn deserialize_path_normalized<E: DeError>(v: &str) -> Result<PathBuf, E> {
     normalize_path(v.as_ref()).map_err(E::custom)
-}
-
-struct AttrLinkVisitor;
-
-impl<'de> Visitor<'de> for AttrLinkVisitor {
-    type Value = AttrLink;
-
-    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "a link attribute")
-    }
-
-    fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-    where
-        E: DeError,
-    {
-        match v {
-            "recursive" => Ok(AttrLink::Recursive),
-            _ => Err(E::custom("unexpected value")),
-        }
-    }
-
-    fn visit_bool<E>(self, v: bool) -> Result<Self::Value, E>
-    where
-        E: DeError,
-    {
-        match v {
-            true => Ok(AttrLink::True),
-            false => Ok(AttrLink::False),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for AttrLink {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(AttrLinkVisitor)
-    }
 }
 
 struct ProfileNodeVistor;
@@ -62,7 +23,7 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
     where
         E: DeError,
     {
-        deserialize_path_normalized(v.as_ref()).map(path_only_node)
+        deserialize_path_normalized(v).map(path_only_node)
     }
 
     #[instrument(skip_all)]
@@ -73,11 +34,11 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
         let mut attr = ProfileAttr::default();
         let mut children = Vec::with_capacity(map.size_hint().unwrap_or_default());
         while let Some(key) = map.next_key::<&str>()? {
-            if key.starts_with("~") {
-                match &key[1..] {
-                    "from" => attr.from = Some(deserialize_path_normalized(map.next_value()?)?),
-                    "link" => attr.link = Some(map.next_value()?),
-                    "tmpl" => attr.tmpl = Some(map.next_value()?),
+            if let Some(attr_str) = key.strip_prefix('~') {
+                match attr_str {
+                    "source" => attr.source = Some(deserialize_path_normalized(map.next_value()?)?),
+                    "type" => attr.ty = Some(map.next_value()?),
+                    "recursive" => attr.recursive = Some(map.next_value()?),
                     "ignore" => attr.ignore = Some(Rc::new(map.next_value()?)),
                     _ => {
                         warn!("Undefined attribute '{}'", key);
@@ -105,31 +66,14 @@ impl<'de> Deserialize<'de> for ProfileNode {
 
 #[cfg(test)]
 mod tests {
-    use crate::profile::path_only_attr;
-
     use super::*;
-
-    #[test]
-    fn deserialize_attr_link() {
-        assert_eq!(
-            serde_yaml::from_str::<AttrLink>("true").unwrap(),
-            AttrLink::True
-        );
-        assert_eq!(
-            serde_yaml::from_str::<AttrLink>("false").unwrap(),
-            AttrLink::False
-        );
-        assert_eq!(
-            serde_yaml::from_str::<AttrLink>("recursive").unwrap(),
-            AttrLink::Recursive
-        );
-    }
+    use crate::profile::{path_only_attr, AttrType};
 
     #[test]
     fn normalized_path_attributes() {
         let node = serde_yaml::from_str::<ProfileNode>(
             r#"
-            ~from: skip/../path/to/root
+            ~source: skip/../path/to/root
             /path/to/./target1: ../path/to/source1
             "#,
         )
@@ -145,18 +89,18 @@ mod tests {
     fn deserialize_profile_attr() {
         let node = serde_yaml::from_str::<ProfileNode>(
             r#"
-            ~from: path/to/source
-            ~link: true
+            ~source: path/to/source
+            ~type: link
             ~undefined_attr: ...
-            ~tmpl: true
+            ~recursive: true
             "#,
         )
         .unwrap();
         let attr = ProfileAttr {
-            from: Some("path/to/source".into()),
-            link: AttrLink::True.into(),
-            tmpl: true.into(),
-            ignore: <_>::default(),
+            source: Some("path/to/source".into()),
+            ty: Some(AttrType::Link),
+            recursive: Some(true),
+            ignore: None,
         };
         assert_eq!(node.attr, attr);
         assert!(node.children.is_empty());
@@ -168,7 +112,7 @@ mod tests {
             r#"
             target1: path/to/source1
             target2:
-              ~from: path/to/source2
+              ~source: path/to/source2
             "#,
         )
         .unwrap();

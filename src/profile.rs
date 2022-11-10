@@ -66,8 +66,8 @@ fn collect_entries_from_node(
             collect_to,
         );
     }
-    // Ignore entries without 'from' attribute.
-    if attr.from.is_none() {
+    // Ignore entries without `source` attribute.
+    if attr.source.is_none() {
         return;
     }
     collect_to.insert(target, attr);
@@ -76,16 +76,16 @@ fn collect_entries_from_node(
 // TODO: check attributes which are impossible to compile
 fn inherit_attr(target: &Path, attr: ProfileAttr, parent: &ProfileAttr) -> ProfileAttr {
     // Attributes to keep.
-    let from = attr
-        .from
-        // By default, if a child under a node that provides `from` attribute
-        // doesn't define its own `from` attribute, it will be treated a child
-        // of the directory whose parent `from` path it is.
-        .or_else(|| parent.from.as_ref().map(|parent| parent.join(&target)));
+    let source = attr
+        .source
+        // By default, if a child under a node that provides `source` attribute
+        // doesn't define its own `source` attribute, it will be treated a child
+        // of the directory whose parent `source` path it is.
+        .or_else(|| parent.source.as_ref().map(|parent| parent.join(target)));
     // Attributes to override.
     // TODO: a template or linked path cannot have children
-    let link = attr.link.or(parent.link);
-    let tmpl = attr.tmpl.or(parent.tmpl);
+    let ty = attr.ty.or(parent.ty);
+    let recursive = attr.recursive.or(parent.recursive);
     // Attributes to extend.
     let ignore = match (attr.ignore, parent.ignore.clone()) {
         (Some(this), Some(parent)) => Some(Rc::new(parent.extend(&this))),
@@ -93,9 +93,9 @@ fn inherit_attr(target: &Path, attr: ProfileAttr, parent: &ProfileAttr) -> Profi
         _ => None,
     };
     ProfileAttr {
-        from,
-        link,
-        tmpl,
+        source,
+        ty,
+        recursive,
         ignore,
     }
 }
@@ -131,23 +131,24 @@ fn merge_attr(dest: &mut ProfileAttr, src: ProfileAttr) {
             $(src.$field.map(|v| dest.$field.insert(v));)*
         };
     }
-    merge_attr_fields!(from, link, tmpl, ignore);
+    merge_attr_fields!(source, ty, recursive, ignore);
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProfileAttr {
-    pub from: Option<PathBuf>,
-    pub link: Option<AttrLink>,
-    pub tmpl: Option<bool>,
+    pub source: Option<PathBuf>,
+    pub ty: Option<AttrType>,
+    pub recursive: Option<bool>,
     pub ignore: Option<Rc<PatternSetBuilder>>,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum AttrLink {
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(expecting = "a type attribute", rename_all = "lowercase")]
+pub enum AttrType {
     #[default]
-    False,
-    True,
-    Recursive,
+    Copy,
+    Link,
+    Template,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -156,22 +157,22 @@ struct ProfileNode {
     children: Vec<(PathBuf, ProfileNode)>,
 }
 
-fn path_only_attr<T>(from: T) -> ProfileAttr
+fn path_only_attr<T>(source: T) -> ProfileAttr
 where
     T: Into<PathBuf>,
 {
     ProfileAttr {
-        from: Some(from.into()),
+        source: Some(source.into()),
         ..Default::default()
     }
 }
 
-fn path_only_node<T>(from: T) -> ProfileNode
+fn path_only_node<T>(source: T) -> ProfileNode
 where
     T: Into<PathBuf>,
 {
     ProfileNode {
-        attr: path_only_attr(from.into()),
+        attr: path_only_attr(source.into()),
         ..Default::default()
     }
 }
@@ -234,12 +235,12 @@ mod tests {
         }
     }
 
-    fn path_only_component_node<'a, T>(from: T) -> ComponentNode<'a>
+    fn path_only_component_node<'a, T>(source: T) -> ComponentNode<'a>
     where
         T: Into<PathBuf>,
     {
         ComponentNode {
-            attr: path_only_attr(from),
+            attr: path_only_attr(source),
             ..Default::default()
         }
     }
@@ -276,20 +277,20 @@ mod tests {
             path:
               to:
                 target1:
-                  ~from: path/to/source1
-                  ~link: true
+                  ~source: path/to/source1
+                  ~type: link
               to/target1:
-                  ~tmpl: true
+                  ~type: template
             path/to/target1:
-              ~link: recursive
-              ~tmpl: false
+              ~type: link
+              ~recursive: true
             "#,
         )
         .unwrap();
         let attr = ProfileAttr {
-            from: Some("path/to/source1".into()),
-            link: Some(AttrLink::Recursive),
-            tmpl: Some(false),
+            source: Some("path/to/source1".into()),
+            ty: Some(AttrType::Link),
+            recursive: Some(true),
             ignore: None,
         };
         let expected = create_component_node([(
@@ -336,10 +337,10 @@ mod tests {
         let entries = serde_yaml::from_str::<Profile>(
             r#"
             path/to/target:
-              ~from: path/to/source
+              ~source: path/to/source
               child1: path/to/child1
               child2:
-                ~link: true
+                ~type: link
             "#,
         )
         .unwrap()
@@ -354,8 +355,8 @@ mod tests {
         expected.insert(
             "path/to/target/child2".into(),
             ProfileAttr {
-                from: Some("path/to/source/child2".into()),
-                link: Some(AttrLink::True),
+                source: Some("path/to/source/child2".into()),
+                ty: Some(AttrType::Link),
                 ..Default::default()
             },
         );
