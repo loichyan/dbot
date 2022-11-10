@@ -1,14 +1,6 @@
-# 🤖 DBot
+# 🤖 DBot (WIP)
 
 A simple dotfiles manager written in Rust.
-
-```yaml
-profile:
-  ~ignore:
-    - abc
-    - def
-  ~path: "xx"
-```
 
 ## ⚖️ License
 
