@@ -12,14 +12,16 @@ use std::{
     rc::Rc,
 };
 
-#[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
+pub type ProfileEntries = HashMap<PathBuf, ProfileAttr>;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(transparent)]
 pub struct Profile {
     root: ProfileNode,
 }
 
 impl Profile {
-    pub fn into_entries(mut self) -> Result<HashMap<PathBuf, ProfileAttr>, Error> {
+    pub fn into_entries(mut self) -> Result<ProfileEntries, Error> {
         let ComponentNode { attr, children } = self.build_component_tree();
         let mut collect_to = HashMap::default();
         for (child_target, child_node) in children {
@@ -55,7 +57,7 @@ fn collect_entries_from_node(
     node: ComponentNode<'_>,
     parent_target: &Path,
     parent: &ProfileAttrBuilder,
-    collect_to: &mut HashMap<PathBuf, ProfileAttr>,
+    collect_to: &mut ProfileEntries,
 ) -> Result<(), Error> {
     let ComponentNode { mut attr, children } = node;
     let full_target = parent_target.join(target);
@@ -153,7 +155,7 @@ fn merge_attr(dest: &mut ProfileAttrBuilder, src: ProfileAttrBuilder) {
     merge_attr_fields!(source, ty, recursive, ignore);
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ProfileAttrBuilder {
     source: Option<PathBuf>,
     ty: Option<AttrType>,
@@ -188,7 +190,7 @@ impl ProfileAttrBuilder {
     }
 }
 
-#[cfg_attr(test, derive(PartialEq, Eq))]
+#[cfg_attr(test, derive(Eq, PartialEq,))]
 #[derive(Clone, Debug, Default)]
 pub struct ProfileAttr {
     pub source: PathBuf,
@@ -197,7 +199,7 @@ pub struct ProfileAttr {
     pub ignore: PatternSet,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(expecting = "a type attribute", rename_all = "lowercase")]
 pub enum AttrType {
     #[default]
@@ -206,7 +208,7 @@ pub enum AttrType {
     Template,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ProfileNode {
     attr: ProfileAttrBuilder,
     children: Vec<(PathBuf, ProfileNode)>,
@@ -250,7 +252,7 @@ fn normalize_path(path: &Path) -> Result<PathBuf, &'static str> {
     Ok(buf)
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ComponentNode<'a> {
     attr: ProfileAttrBuilder,
     children: HashMap<&'a OsStr, ComponentNode<'a>>,

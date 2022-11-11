@@ -34,5 +34,5 @@ impl PatternSetBuilder {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Pattern(Glob);
