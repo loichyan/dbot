@@ -22,17 +22,15 @@ pub struct Profile {
 
 impl Profile {
     pub fn into_entries(mut self) -> Result<ProfileEntries, Error> {
-        let ComponentNode { attr, children } = self.build_component_tree();
         let mut collect_to = HashMap::default();
-        for (child_target, child_node) in children {
-            collect_entries_from_node(
-                child_target.as_ref(),
-                child_node,
-                "".as_ref(),
-                &attr,
-                &mut collect_to,
-            )?;
-        }
+        let node = self.build_component_tree();
+        collect_entries_from_node(
+            "".as_ref(),
+            node,
+            "".as_ref(),
+            &<_>::default(),
+            &mut collect_to,
+        )?;
         Ok(collect_to)
     }
 
@@ -43,11 +41,8 @@ impl Profile {
     /// in order to properly handle the attribute inheritance relationships
     /// during [`collect_entries`].
     fn build_component_tree(&mut self) -> ComponentNode<'_> {
-        let node = &mut self.root;
         let mut tree = ComponentNode::default();
-        for (child_target, child_node) in node.children.iter_mut() {
-            update_component_tree(child_target, child_node, &mut tree);
-        }
+        update_component_tree("".as_ref(), &mut self.root, &mut tree);
         tree
     }
 }
