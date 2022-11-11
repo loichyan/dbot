@@ -1,7 +1,9 @@
-use super::{Pattern, PatternSetBuilder};
+use super::PatternSetBuilder;
 use globset::Glob;
 use serde::{de::Visitor, Deserialize};
 use std::fmt;
+
+struct Pattern(Glob);
 
 struct PatternVisitor;
 
@@ -45,18 +47,24 @@ impl<'de> Visitor<'de> for PatternSetVisitor {
         E: serde::de::Error,
     {
         let pat = PatternVisitor.visit_str(v)?;
-        Ok(PatternSetBuilder(vec![pat]))
+        Ok(PatternSetBuilder {
+            builder: vec![pat.0],
+            ..Default::default()
+        })
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::SeqAccess<'de>,
     {
-        let mut patterns = Vec::with_capacity(seq.size_hint().unwrap_or_default());
+        let mut builder = Vec::with_capacity(seq.size_hint().unwrap_or_default());
         while let Some(pat) = seq.next_element::<Pattern>()? {
-            patterns.push(pat);
+            builder.push(pat.0);
         }
-        Ok(PatternSetBuilder(patterns))
+        Ok(PatternSetBuilder {
+            builder,
+            ..Default::default()
+        })
     }
 }
 

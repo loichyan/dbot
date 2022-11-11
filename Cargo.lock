@@ -37,6 +37,7 @@ name = "dbot"
 version = "0.0.0"
 dependencies = [
  "globset",
+ "once_cell",
  "serde",
  "serde_yaml",
  "thiserror",

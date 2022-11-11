@@ -172,10 +172,10 @@ impl ProfileAttrBuilder {
                 ty: ty.unwrap_or_default(),
                 recursive: recursive.unwrap_or_default(),
                 ignore: match ignore {
-                    Some(builder) => Rc::try_unwrap(builder)
-                        .map(|builder| builder.build())
-                        .unwrap_or_else(|builder| (*builder).clone().build())
-                        .ok_or_else(|| Error::InvalidPatternSet(target.into()))?,
+                    Some(builder) => builder
+                        .build()
+                        // TODO: error source
+                        .map_err(|_| Error::InvalidPatternSet(target.into()))?,
                     None => <_>::default(),
                 },
             }))
@@ -191,7 +191,7 @@ pub struct ProfileAttr {
     pub source: PathBuf,
     pub ty: AttrType,
     pub recursive: bool,
-    pub ignore: PatternSet,
+    pub ignore: Rc<PatternSet>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]

@@ -6,6 +6,6 @@ use thiserror::Error;
 pub enum Error {
     #[error("a linked or template file cannot have children: '{}'", .0.display())]
     UnexpectedChildren(PathBuf),
-    #[error("")]
+    #[error("invalid pattern set found: '{}'", .0.display())]
     InvalidPatternSet(PathBuf),
 }

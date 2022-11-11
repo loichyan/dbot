@@ -1,9 +1,48 @@
 mod de;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
+use once_cell::sync::OnceCell;
+use std::rc::Rc;
 
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct PatternSetBuilder(Vec<Pattern>);
+#[derive(Clone, Debug, Default)]
+pub struct PatternSetBuilder {
+    builder: Vec<Glob>,
+    set: OnceCell<Rc<PatternSet>>,
+}
+
+impl PartialEq for PatternSetBuilder {
+    fn eq(&self, other: &Self) -> bool {
+        self.builder.eq(&other.builder)
+    }
+}
+
+impl Eq for PatternSetBuilder {}
+
+impl PatternSetBuilder {
+    pub fn extend(&self, other: &PatternSetBuilder) -> PatternSetBuilder {
+        Self {
+            builder: self
+                .builder
+                .iter()
+                .cloned()
+                .chain(other.builder.iter().cloned())
+                .collect(),
+            set: <_>::default(),
+        }
+    }
+
+    pub fn build(&self) -> Result<Rc<PatternSet>, globset::Error> {
+        self.set
+            .get_or_try_init(|| {
+                let mut builder = GlobSetBuilder::new();
+                for pat in self.builder.iter().cloned() {
+                    builder.add(pat);
+                }
+                builder.build().map(PatternSet).map(Rc::new)
+            })
+            .cloned()
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct PatternSet(GlobSet);
@@ -17,22 +56,3 @@ impl PartialEq for PatternSet {
 
 #[cfg(test)]
 impl Eq for PatternSet {}
-
-impl PatternSetBuilder {
-    pub fn build(self) -> Option<PatternSet> {
-        let mut builder = GlobSetBuilder::new();
-        for s in self.0 {
-            builder.add(s.0);
-        }
-        builder.build().map(PatternSet).ok()
-    }
-
-    pub fn extend(&self, other: &PatternSetBuilder) -> PatternSetBuilder {
-        Self(Vec::from_iter(
-            self.0.iter().cloned().chain(other.0.iter().cloned()),
-        ))
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Pattern(Glob);
