@@ -11,6 +11,15 @@ thiserror = "1.0"
 tracing = "0.1"
 tracing-subscriber = "0.3"
 
+[dependencies.dotfish]
+git = "https://github.com/loichyan/dotfish"
+
 [dependencies.serde]
 version = "1.0"
 features = ["derive"]
+
+[dependencies.thisctx]
+git = "https://github.com/loichyan/thisctx"
+
+[dev-dependencies]
+tempfile = "3.3"
