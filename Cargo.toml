@@ -18,6 +18,10 @@ git = "https://github.com/loichyan/dotfish"
 version = "1.0"
 features = ["derive"]
 
+[dependencies.tera]
+version = "1.17"
+default-features = false
+
 [dependencies.thisctx]
 git = "https://github.com/loichyan/thisctx"
 

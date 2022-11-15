@@ -21,4 +21,6 @@ pub enum Error {
     },
     #[error("A template cannot be created from a directory: '{0}'")]
     UnexpectedDirectoryForTemplate(PathBuf),
+    #[error("{source}: '{path}'")]
+    InvalidTemplate { source: tera::Error, path: PathBuf },
 }
