@@ -2,7 +2,7 @@ mod de;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
 use once_cell::sync::OnceCell;
-use std::rc::Rc;
+use std::{path::Path, rc::Rc};
 
 #[derive(Clone, Debug, Default)]
 pub struct PatternSetBuilder {
@@ -56,3 +56,9 @@ impl PartialEq for PatternSet {
 
 #[cfg(test)]
 impl Eq for PatternSet {}
+
+impl PatternSet {
+    pub fn is_match<P: AsRef<Path>>(&self, path: P) -> bool {
+        self.0.is_match(path.as_ref())
+    }
+}

@@ -1,7 +1,7 @@
 mod de;
 
 use crate::{
-    error::Error,
+    error,
     pattern::{PatternSet, PatternSetBuilder},
 };
 use serde::Deserialize;
@@ -11,8 +11,9 @@ use std::{
     path::{Component, Path, PathBuf},
     rc::Rc,
 };
+use thisctx::WithContext;
 
-pub type ProfileEntries = HashMap<PathBuf, ProfileAttr>;
+pub type ProfileEntries = Vec<(PathBuf, ProfileAttr)>;
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(transparent)]
@@ -21,8 +22,8 @@ pub struct Profile {
 }
 
 impl Profile {
-    pub fn into_entries(mut self) -> Result<ProfileEntries, Error> {
-        let mut collect_to = HashMap::default();
+    pub fn into_entries(mut self) -> error::Result<ProfileEntries> {
+        let mut collect_to = ProfileEntries::default();
         let node = self.build_component_tree();
         collect_entries_from_node(
             "".as_ref(),
@@ -31,6 +32,7 @@ impl Profile {
             &<_>::default(),
             &mut collect_to,
         )?;
+        collect_to.sort_by(|(a, _), (b, _)| a.cmp(b));
         Ok(collect_to)
     }
 
@@ -53,7 +55,7 @@ fn collect_entries_from_node(
     parent_target: &Path,
     parent: &ProfileAttrBuilder,
     collect_to: &mut ProfileEntries,
-) -> Result<(), Error> {
+) -> error::Result<()> {
     let ComponentNode { mut attr, children } = node;
     let full_target = parent_target.join(target);
 
@@ -65,7 +67,7 @@ fn collect_entries_from_node(
         && !matches!(attr.recursive, Some(true))
         && !children.is_empty()
     {
-        return Err(Error::UnexpectedChildren(full_target));
+        return ().context(error::UnexpectedChildrenContext(full_target));
     }
 
     // 3) Collect from child nodes.
@@ -82,7 +84,7 @@ fn collect_entries_from_node(
     // 4) Build attribute and collect to entries.
     // Ignore entries without `source` attribute.
     if let Some(attr) = attr.build(&full_target)? {
-        collect_to.insert(full_target, attr);
+        collect_to.push((full_target, attr));
     }
     Ok(())
 }
@@ -91,7 +93,7 @@ fn inherit_attr(
     target: &Path,
     attr: ProfileAttrBuilder,
     parent: &ProfileAttrBuilder,
-) -> Result<ProfileAttrBuilder, Error> {
+) -> error::Result<ProfileAttrBuilder> {
     // Attributes to keep.
     let source = attr
         .source
@@ -159,7 +161,7 @@ struct ProfileAttrBuilder {
 }
 
 impl ProfileAttrBuilder {
-    fn build(self, target: &Path) -> Result<Option<ProfileAttr>, Error> {
+    fn build(self, target: &Path) -> error::Result<Option<ProfileAttr>> {
         let ProfileAttrBuilder {
             source,
             ty,
@@ -174,8 +176,8 @@ impl ProfileAttrBuilder {
                 ignore: match ignore {
                     Some(builder) => builder
                         .build()
-                        // TODO: error source
-                        .map_err(|_| Error::InvalidPatternSet(target.into()))?,
+                        .ok()
+                        .context(error::InvalidPatternSetContext(target))?,
                     None => <_>::default(),
                 },
             }))
@@ -186,7 +188,7 @@ impl ProfileAttrBuilder {
 }
 
 #[cfg_attr(test, derive(Eq, PartialEq,))]
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ProfileAttr {
     pub source: PathBuf,
     pub ty: AttrType,
@@ -297,9 +299,13 @@ mod tests {
         }
     }
 
+    fn profile_from_str(s: &str) -> Profile {
+        serde_yaml::from_str(s).unwrap()
+    }
+
     #[test]
     fn build_component_tree() {
-        let mut profile = serde_yaml::from_str::<Profile>(
+        let mut profile = profile_from_str(
             r#"
             path:
               to:
@@ -307,8 +313,7 @@ mod tests {
               to/target2: path/to/source2
             path/to/target3: path/to/source3
             "#,
-        )
-        .unwrap();
+        );
         let children = create_component_node(
             [
                 ("target1", "path/to/source1"),
@@ -324,7 +329,7 @@ mod tests {
 
     #[test]
     fn merge_attributes() {
-        let mut profile = serde_yaml::from_str::<Profile>(
+        let mut profile = profile_from_str(
             r#"
             path:
               to:
@@ -337,8 +342,7 @@ mod tests {
               ~type: link
               ~recursive: true
             "#,
-        )
-        .unwrap();
+        );
         let attr = ProfileAttrBuilder {
             source: Some("path/to/source1".into()),
             ty: Some(AttrType::Link),
@@ -363,7 +367,7 @@ mod tests {
 
     #[test]
     fn collect_entries() {
-        let entries = serde_yaml::from_str::<Profile>(
+        let entries = profile_from_str(
             r#"
             path:
               to:
@@ -372,7 +376,6 @@ mod tests {
             path/to/target3: path/to/source3
             "#,
         )
-        .unwrap()
         .into_entries()
         .unwrap();
         let expected = [
@@ -390,13 +393,13 @@ mod tests {
                     .unwrap(),
             )
         })
-        .collect::<HashMap<_, _>>();
+        .collect::<Vec<_>>();
         assert_eq!(entries, expected);
     }
 
     #[test]
     fn inherited_from_attribute() {
-        let entries = serde_yaml::from_str::<Profile>(
+        let entries = profile_from_str(
             r#"
             path/to/target:
               ~source: path/to/source
@@ -405,7 +408,6 @@ mod tests {
                 ~type: link
             "#,
         )
-        .unwrap()
         .into_entries()
         .unwrap();
         let mut expected = [
@@ -422,21 +424,26 @@ mod tests {
                     .unwrap(),
             )
         })
-        .collect::<HashMap<_, _>>();
-        expected.insert(
+        .collect::<Vec<_>>();
+        expected.push((
             "path/to/target/child2".into(),
             ProfileAttr {
                 source: "path/to/source/child2".into(),
                 ty: AttrType::Link,
-                ..Default::default()
+                recursive: false,
+                ignore: <_>::default(),
             },
-        );
+        ));
         assert_eq!(entries, expected);
     }
 
-    fn test_into_entries_error(s: &str, err: Error) {
-        let result = serde_yaml::from_str::<Profile>(s).unwrap().into_entries();
-        assert_eq!(result, Err(err))
+    fn test_into_entries_error(s: &str, f: impl FnOnce(error::Error) -> bool) {
+        let result = profile_from_str(s).into_entries();
+        assert!(f(result.unwrap_err()))
+    }
+
+    fn expects_unexpected_children<'a>(path: &'a Path) -> impl 'a + FnOnce(error::Error) -> bool {
+        move |err| matches!(err, error::Error::UnexpectedChildren(p) if &p == path)
     }
 
     #[test]
@@ -448,7 +455,7 @@ mod tests {
               ~type: link
               child1: path/to/child1
             "#,
-            Error::UnexpectedChildren("path/to/target".into()),
+            expects_unexpected_children("path/to/target".as_ref()),
         );
         test_into_entries_error(
             r#"
@@ -458,7 +465,7 @@ mod tests {
               ~recursive: false
               child1: path/to/child1
             "#,
-            Error::UnexpectedChildren("path/to/target".into()),
+            expects_unexpected_children("path/to/target".as_ref()),
         );
     }
 }
