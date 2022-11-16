@@ -24,10 +24,14 @@ pub fn compile(options: &CompilerOptions, profile: Profile) -> error::Result<Com
     let mut compiled = CompiledEntries::default();
     // Compile child targets first to avoid double compiling.
     for (target, attr) in entries.into_iter().rev() {
+        if cfg!(not(unix)) && matches!(attr.ty, AttrType::Link) {
+            return None.context(error::UnsupportedSymlinksContext(attr.source));
+        }
         compile_entry(
             options.target.join(&target),
             options.source.join(&attr.source),
             &attr,
+            // TODO: copied source must be recursive
             attr.recursive || matches!(attr.ty, AttrType::Copy),
             &mut compiled,
         )?;
@@ -91,36 +95,13 @@ fn compile_entry(
     Ok(())
 }
 
+// TODO: test ignore patterns and overrided parent attributes
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::profile::Profile;
     use dotfish::DotFish;
     use std::path::Path;
-
-    fn touch(path: &Path) {
-        std::fs::File::create(path).unwrap();
-    }
-
-    fn mkdir(path: &Path) {
-        std::fs::create_dir(path).unwrap();
-    }
-
-    macro_rules! create_tree {
-        ($path:expr, { $file:ident $(, $rest:tt)* $(,)? }) => {
-            let path = $path;
-            touch(&path.join(stringify!($file)));
-            create_tree!(path, { $($rest)* })
-        };
-        ($path:expr, { $dir:ident: $children:tt $(, $rest:tt)* $(,)? }) => {
-            let path = $path;
-            let dir = path.join(stringify!($dir));
-            mkdir(&dir);
-            create_tree!(&dir, $children);
-            create_tree!(path, { $($rest)* })
-        };
-        ($path:expr, {}) => {};
-    }
 
     fn compile_str(source: &Path, profile: &str) -> error::Result<CompiledEntries> {
         let profile = serde_yaml::from_str::<Profile>(profile).unwrap();
@@ -133,7 +114,7 @@ mod tests {
         )
     }
 
-    fn create_test_tree(tmp: &Path) {
+    fn create_tmp_tree(tmp: &Path) {
         create_tree!(tmp, {
             path: {
                 to: {
@@ -164,7 +145,7 @@ mod tests {
     #[test]
     fn copy_source() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let entries = compile_str(
             tempdir.path(),
             r#"
@@ -179,7 +160,7 @@ mod tests {
     #[test]
     fn link_source() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let entries = compile_str(
             tempdir.path(),
             r#"
@@ -203,7 +184,7 @@ mod tests {
     #[test]
     fn link_source_recursive() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let entries = compile_str(
             tempdir.path(),
             r#"
@@ -221,7 +202,7 @@ mod tests {
     #[test]
     fn template_source() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let result = compile_str(
             tempdir.path(),
             r#"
@@ -243,7 +224,7 @@ mod tests {
     #[test]
     fn template_source_recursive() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let entries = compile_str(
             tempdir.path(),
             r#"

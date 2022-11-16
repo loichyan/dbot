@@ -105,7 +105,7 @@ dependencies = [
 [[package]]
 name = "dotfish"
 version = "0.0.0"
-source = "git+https://github.com/loichyan/dotfish#228da5e5547caa4e10be8eee463d99da746cbabd"
+source = "git+https://github.com/loichyan/dotfish#16bbf7b4645909ab7b1d289d26e10d79ea3fde7d"
 
 [[package]]
 name = "fastrand"

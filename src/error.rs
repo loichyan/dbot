@@ -23,4 +23,6 @@ pub enum Error {
     UnexpectedDirectoryForTemplate(PathBuf),
     #[error("{source}: '{path}'")]
     InvalidTemplate { source: tera::Error, path: PathBuf },
+    #[error("Symlinks are only supported on unix systems: '{0}'")]
+    UnsupportedSymlinks(PathBuf),
 }

@@ -33,3 +33,5 @@ impl Renderer {
             .context(error::InvalidTemplateContext { path })
     }
 }
+
+// TODO: add tests
