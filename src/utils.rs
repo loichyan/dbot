@@ -8,7 +8,7 @@ mod test_utils {
     }
 
     pub fn mkdir(path: &Path) {
-        std::fs::create_dir(path).unwrap();
+        std::fs::create_dir_all(path).unwrap();
     }
 
     macro_rules! create_tree {

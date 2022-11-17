@@ -95,7 +95,6 @@ fn compile_entry(
     Ok(())
 }
 
-// TODO: test ignore patterns and overrided parent attributes
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -128,7 +127,11 @@ mod tests {
     }
 
     fn touched_file_entries(tmp: &Path, ty: AttrType) -> CompiledEntries {
-        ["file1", "file2"]
+        compiled_entries(tmp, &["file1", "file2"], ty)
+    }
+
+    fn compiled_entries(tmp: &Path, paths: &[&str], ty: AttrType) -> CompiledEntries {
+        paths
             .iter()
             .map(|filename| {
                 (
@@ -139,7 +142,7 @@ mod tests {
                     },
                 )
             })
-            .collect::<CompiledEntries>()
+            .collect()
     }
 
     #[test]
@@ -236,6 +239,79 @@ mod tests {
         )
         .unwrap();
         let expected = touched_file_entries(tempdir.path(), AttrType::Template);
+        assert_eq!(entries, expected);
+    }
+
+    #[test]
+    fn ignore() {
+        let tempdir = tempfile::tempdir().unwrap();
+        create_tree!(tempdir.path(), {
+            path: {
+                to: {
+                    source: {
+                        file1,
+                        file2,
+                        ignore1,
+                        ignore2,
+                        ignore_dir: {
+                            file1,
+                            file2,
+                        },
+                    },
+                },
+            },
+        });
+        let entries = compile_str(
+            tempdir.path(),
+            r#"
+            path/to/target:
+                ~source: path/to/source
+                ~ignore: 
+                  - ignore*
+                  - ignore_dir/*
+            "#,
+        )
+        .unwrap();
+        let expected = touched_file_entries(tempdir.path(), AttrType::Copy);
+        assert_eq!(entries, expected);
+    }
+
+    #[test]
+    fn child_profile() {
+        let tempdir = tempfile::tempdir().unwrap();
+        create_tree!(tempdir.path(), {
+            path: {
+                to: {
+                    source: {
+                        dir1: {
+                            file1,
+                            file2,
+                        },
+                        dir2: {
+                            file3,
+                            file4,
+                        },
+                    },
+                },
+            },
+        });
+        let entries = compile_str(
+            tempdir.path(),
+            r#"
+            path/to/target:
+              ~source: path/to/source
+              ~type: link
+              ~recursive: true
+              dir2:
+                ~recursive: false
+            "#,
+        )
+        .unwrap();
+        let expected = compiled_entries(
+            tempdir.path(),
+            &["dir1/file1", "dir1/file2", "dir2"],
+            AttrType::Link,
+        );
         assert_eq!(entries, expected);
     }
 }

@@ -11,3 +11,4 @@ pub mod template;
 
 pub use apply::apply;
 pub use compile::compile;
+pub use error::Error;
