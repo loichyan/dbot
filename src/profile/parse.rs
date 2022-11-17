@@ -20,7 +20,13 @@ struct Parser<'a> {
 
 type ParseResult<T> = Result<T, String>;
 
-macro_rules! ident_pat {
+enum Value<'a> {
+    String(&'a str),
+    True,
+    False,
+}
+
+macro_rules! ident_start {
     () => {
         b'a'..=b'z' | b'A'..=b'Z' | b'_'
     };
@@ -78,7 +84,9 @@ impl<'a> Parser<'a> {
         let mut attr = ProfileAttrBuilder::default();
 
         self.skip_spaces();
-        match self.next_ident()? {
+        self.buf_start();
+        self.expect(|ch| matches!(ch, ident_start!()))?;
+        match self.next_ident() {
             "copy" => attr.ty = Some(AttrType::Copy),
             "link" => attr.ty = Some(AttrType::Link),
             "template" => attr.ty = Some(AttrType::Template),
@@ -87,9 +95,10 @@ impl<'a> Parser<'a> {
 
         loop {
             self.skip_spaces();
-            match self.byte() {
+            self.buf_start();
+            match self.next() {
                 Some(ch) => match ch {
-                    ident_pat!() => self.next_attribute(&mut attr)?,
+                    ident_start!() => self.next_attribute(&mut attr)?,
                     b'>' => break,
                     _ => return Err(self.unexpected_char(self.index)),
                 },
@@ -108,27 +117,31 @@ impl<'a> Parser<'a> {
             };
         }
 
-        let key = self.next_ident()?;
+        let key = self.next_ident();
         self.skip_spaces();
         let val = if matches!(self.byte(), Some(b'=')) {
             self.advance();
             self.skip_spaces();
-            self.next_string()?
+            self.next_value()?
         } else {
-            ""
+            Value::True
         };
         match key {
             "recursive" => {
                 check_dup!(recursive);
                 match val {
-                    "true" | "" => attr.recursive = Some(true),
-                    "false" => attr.recursive = Some(false),
-                    _ => return Err(format!("invalid 'recursive' value '{}'", val)),
+                    Value::True => attr.recursive = Some(true),
+                    Value::False => attr.recursive = Some(false),
+                    _ => return Err("value of 'recursive' must be a bool".to_owned()),
                 }
             }
             "source" => {
                 check_dup!(source);
-                attr.source = Some(normalize_path(val)?)
+                if let Value::String(s) = val {
+                    attr.source = Some(normalize_path(s)?)
+                } else {
+                    return Err("value of 'source' must be a string".to_owned());
+                }
             }
             _ => warn!("Undefined attribute '{}'", key),
         }
@@ -136,17 +149,30 @@ impl<'a> Parser<'a> {
         Ok(())
     }
 
-    fn next_ident(&mut self) -> ParseResult<&'a str> {
-        self.buf_start();
-        self.expect(|ch| matches!(ch, ident_pat!()))?;
-        while matches!(self.byte(), Some(ident_pat!() | b'0'..=b'9')) {
+    fn next_ident(&mut self) -> &'a str {
+        while matches!(self.byte(), Some(ident_start!() | b'0'..=b'9')) {
             self.advance();
         }
-        Ok(self.buf_end())
+        self.buf_end()
+    }
+
+    fn next_value(&mut self) -> ParseResult<Value<'a>> {
+        self.buf_start();
+        match self.next() {
+            Some(ch) => match ch {
+                b'"' => self.next_string().map(Value::String),
+                ident_start!() => match self.next_ident() {
+                    "true" => Ok(Value::True),
+                    "false" => Ok(Value::False),
+                    ident => Err(format!("unexpected identifier '{}'", ident)),
+                },
+                _ => Err(self.unexpected_char(self.index - 1)),
+            },
+            None => Err(self.unexpected_eos()),
+        }
     }
 
     fn next_string(&mut self) -> ParseResult<&'a str> {
-        self.expect(|ch| ch == b'"')?;
         self.buf_start();
         while let Some(ch) = self.next() {
             if ch == b'"' {
@@ -171,7 +197,7 @@ impl<'a> Parser<'a> {
                     Err(self.unexpected_char(self.index - 1))
                 }
             }
-            None => Err("unexpected end of string".to_owned()),
+            None => Err(self.unexpected_eos()),
         }
     }
 
@@ -181,6 +207,10 @@ impl<'a> Parser<'a> {
             self.char_at(at).unwrap_unreachable2(),
             self.index,
         )
+    }
+
+    fn unexpected_eos(&self) -> String {
+        "unexpected end of string".to_owned()
     }
 }
 
@@ -264,11 +294,11 @@ mod test {
             expect_link_and_recursive(true)
         );
         assert_eq!(
-            parse_attribute(r#"<link recursive="true">"#).unwrap(),
+            parse_attribute(r#"<link recursive=true>"#).unwrap(),
             expect_link_and_recursive(true)
         );
         assert_eq!(
-            parse_attribute(r#"<link recursive="false">"#).unwrap(),
+            parse_attribute(r#"<link recursive=false>"#).unwrap(),
             expect_link_and_recursive(false)
         );
     }
@@ -284,10 +314,6 @@ mod test {
         }
 
         assert_eq!(
-            parse_attribute("<link source>").unwrap(),
-            expect_link_and_source("")
-        );
-        assert_eq!(
             parse_attribute(r#"<link source="path/to/source">"#).unwrap(),
             expect_link_and_source("path/to/source")
         );
@@ -301,7 +327,7 @@ mod test {
             recursive: Some(false),
             ..Default::default()
         };
-        let s = r#"  <  template  recursive  =  "false"  source  =  "path/to/source"  >  "#;
+        let s = r#"  <  template  recursive  =  false  source  =  "path/to/source"  >  "#;
         assert_eq!(parse_attribute(s).unwrap(), expected);
     }
 }
