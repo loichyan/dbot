@@ -442,8 +442,8 @@ mod tests {
         assert!(f(result.unwrap_err()))
     }
 
-    fn expects_unexpected_children<'a>(path: &'a Path) -> impl 'a + FnOnce(error::Error) -> bool {
-        move |err| matches!(err, error::Error::UnexpectedChildren(p) if &p == path)
+    fn expects_unexpected_children(path: &Path) -> impl '_ + FnOnce(error::Error) -> bool {
+        move |err| matches!(err, error::Error::UnexpectedChildren(p) if p == path)
     }
 
     #[test]

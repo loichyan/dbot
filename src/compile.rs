@@ -24,10 +24,14 @@ pub fn compile(options: &CompilerOptions, profile: Profile) -> error::Result<Com
     let mut compiled = CompiledEntries::default();
     // Compile child targets first to avoid double compiling.
     for (target, attr) in entries.into_iter().rev() {
+        if cfg!(not(unix)) && matches!(attr.ty, AttrType::Link) {
+            return None.context(error::UnsupportedSymlinksContext(attr.source));
+        }
         compile_entry(
             options.target.join(&target),
             options.source.join(&attr.source),
             &attr,
+            // TODO: copied source must be recursive
             attr.recursive || matches!(attr.ty, AttrType::Copy),
             &mut compiled,
         )?;
@@ -98,30 +102,6 @@ mod tests {
     use dotfish::DotFish;
     use std::path::Path;
 
-    fn touch(path: &Path) {
-        std::fs::File::create(path).unwrap();
-    }
-
-    fn mkdir(path: &Path) {
-        std::fs::create_dir(path).unwrap();
-    }
-
-    macro_rules! create_tree {
-        ($path:expr, { $file:ident $(, $rest:tt)* $(,)? }) => {
-            let path = $path;
-            touch(&path.join(stringify!($file)));
-            create_tree!(path, { $($rest)* })
-        };
-        ($path:expr, { $dir:ident: $children:tt $(, $rest:tt)* $(,)? }) => {
-            let path = $path;
-            let dir = path.join(stringify!($dir));
-            mkdir(&dir);
-            create_tree!(&dir, $children);
-            create_tree!(path, { $($rest)* })
-        };
-        ($path:expr, {}) => {};
-    }
-
     fn compile_str(source: &Path, profile: &str) -> error::Result<CompiledEntries> {
         let profile = serde_yaml::from_str::<Profile>(profile).unwrap();
         compile(
@@ -133,7 +113,7 @@ mod tests {
         )
     }
 
-    fn create_test_tree(tmp: &Path) {
+    fn create_tmp_tree(tmp: &Path) {
         create_tree!(tmp, {
             path: {
                 to: {
@@ -147,7 +127,11 @@ mod tests {
     }
 
     fn touched_file_entries(tmp: &Path, ty: AttrType) -> CompiledEntries {
-        ["file1", "file2"]
+        compiled_entries(tmp, &["file1", "file2"], ty)
+    }
+
+    fn compiled_entries(tmp: &Path, paths: &[&str], ty: AttrType) -> CompiledEntries {
+        paths
             .iter()
             .map(|filename| {
                 (
@@ -158,13 +142,13 @@ mod tests {
                     },
                 )
             })
-            .collect::<CompiledEntries>()
+            .collect()
     }
 
     #[test]
     fn copy_source() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let entries = compile_str(
             tempdir.path(),
             r#"
@@ -179,7 +163,7 @@ mod tests {
     #[test]
     fn link_source() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let entries = compile_str(
             tempdir.path(),
             r#"
@@ -203,7 +187,7 @@ mod tests {
     #[test]
     fn link_source_recursive() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let entries = compile_str(
             tempdir.path(),
             r#"
@@ -221,7 +205,7 @@ mod tests {
     #[test]
     fn template_source() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let result = compile_str(
             tempdir.path(),
             r#"
@@ -243,7 +227,7 @@ mod tests {
     #[test]
     fn template_source_recursive() {
         let tempdir = tempfile::tempdir().unwrap();
-        create_test_tree(tempdir.path());
+        create_tmp_tree(tempdir.path());
         let entries = compile_str(
             tempdir.path(),
             r#"
@@ -255,6 +239,79 @@ mod tests {
         )
         .unwrap();
         let expected = touched_file_entries(tempdir.path(), AttrType::Template);
+        assert_eq!(entries, expected);
+    }
+
+    #[test]
+    fn ignore() {
+        let tempdir = tempfile::tempdir().unwrap();
+        create_tree!(tempdir.path(), {
+            path: {
+                to: {
+                    source: {
+                        file1,
+                        file2,
+                        ignore1,
+                        ignore2,
+                        ignore_dir: {
+                            file1,
+                            file2,
+                        },
+                    },
+                },
+            },
+        });
+        let entries = compile_str(
+            tempdir.path(),
+            r#"
+            path/to/target:
+                ~source: path/to/source
+                ~ignore: 
+                  - ignore*
+                  - ignore_dir/*
+            "#,
+        )
+        .unwrap();
+        let expected = touched_file_entries(tempdir.path(), AttrType::Copy);
+        assert_eq!(entries, expected);
+    }
+
+    #[test]
+    fn child_profile() {
+        let tempdir = tempfile::tempdir().unwrap();
+        create_tree!(tempdir.path(), {
+            path: {
+                to: {
+                    source: {
+                        dir1: {
+                            file1,
+                            file2,
+                        },
+                        dir2: {
+                            file3,
+                            file4,
+                        },
+                    },
+                },
+            },
+        });
+        let entries = compile_str(
+            tempdir.path(),
+            r#"
+            path/to/target:
+              ~source: path/to/source
+              ~type: link
+              ~recursive: true
+              dir2:
+                ~recursive: false
+            "#,
+        )
+        .unwrap();
+        let expected = compiled_entries(
+            tempdir.path(),
+            &["dir1/file1", "dir1/file2", "dir2"],
+            AttrType::Link,
+        );
         assert_eq!(entries, expected);
     }
 }

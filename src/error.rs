@@ -21,4 +21,8 @@ pub enum Error {
     },
     #[error("A template cannot be created from a directory: '{0}'")]
     UnexpectedDirectoryForTemplate(PathBuf),
+    #[error("{source}: '{path}'")]
+    InvalidTemplate { source: tera::Error, path: PathBuf },
+    #[error("Symlinks are only supported on unix systems: '{0}'")]
+    UnsupportedSymlinks(PathBuf),
 }
