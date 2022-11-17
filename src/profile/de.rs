@@ -1,4 +1,7 @@
-use super::{normalize_path, path_only_node, ProfileAttrBuilder, ProfileNode};
+use super::{
+    parse::{normalize_path, parse_attribute},
+    ProfileAttrBuilder, ProfileNode,
+};
 use serde::{
     de::{Error as DeError, Visitor},
     Deserialize,
@@ -7,7 +10,7 @@ use std::{fmt, path::PathBuf, rc::Rc};
 use tracing::{instrument, warn};
 
 fn deserialize_path_normalized<E: DeError>(v: &str) -> Result<PathBuf, E> {
-    normalize_path(v.as_ref()).map_err(E::custom)
+    normalize_path(v).map_err(E::custom)
 }
 
 struct ProfileNodeVistor;
@@ -23,7 +26,10 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
     where
         E: DeError,
     {
-        deserialize_path_normalized(v).map(path_only_node)
+        Ok(ProfileNode {
+            attr: parse_attribute(v).map_err(E::custom)?,
+            ..Default::default()
+        })
     }
 
     #[instrument(skip_all)]
@@ -68,6 +74,16 @@ impl<'de> Deserialize<'de> for ProfileNode {
 mod tests {
     use super::*;
     use crate::profile::{path_only_attr, AttrType};
+
+    fn path_only_node<T>(source: T) -> ProfileNode
+    where
+        T: Into<PathBuf>,
+    {
+        ProfileNode {
+            attr: path_only_attr(source.into()),
+            ..Default::default()
+        }
+    }
 
     #[test]
     fn normalized_path_attributes() {

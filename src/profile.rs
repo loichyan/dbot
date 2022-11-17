@@ -1,4 +1,5 @@
 mod de;
+mod parse;
 
 use crate::{
     error,
@@ -221,34 +222,6 @@ where
     }
 }
 
-fn path_only_node<T>(source: T) -> ProfileNode
-where
-    T: Into<PathBuf>,
-{
-    ProfileNode {
-        attr: path_only_attr(source.into()),
-        ..Default::default()
-    }
-}
-
-fn normalize_path(path: &Path) -> Result<PathBuf, &'static str> {
-    let mut buf = PathBuf::new();
-    for compo in path.components() {
-        match compo {
-            Component::CurDir | Component::RootDir => (),
-            Component::ParentDir => {
-                buf.pop();
-            }
-            Component::Prefix(_) => return Err("a path can't start with a prefix"),
-            _ => buf.push(compo),
-        }
-    }
-    if buf.as_os_str().is_empty() {
-        return Err("a normalized path must not be empty");
-    }
-    Ok(buf)
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ComponentNode<'a> {
     attr: ProfileAttrBuilder,
@@ -258,22 +231,6 @@ struct ComponentNode<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn create_normalized_path() {
-        assert_eq!(
-            PathBuf::from("abc/def"),
-            normalize_path("skip/../abc/def".as_ref()).unwrap()
-        );
-        assert_eq!(
-            PathBuf::from("abc/def"),
-            normalize_path("/abc/def".as_ref()).unwrap()
-        );
-        assert_eq!(
-            PathBuf::from("abc/def"),
-            normalize_path("abc/./def".as_ref()).unwrap()
-        );
-    }
 
     fn create_component_node<'a, I>(entries: I) -> ComponentNode<'a>
     where
