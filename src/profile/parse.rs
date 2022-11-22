@@ -1,15 +1,16 @@
 use super::{path_only_attr, AttrType, ProfileAttrBuilder};
 use dotfish::DotFish;
 use std::path::{Component, Path, PathBuf};
+use thisctx::IntoError;
 use tracing::{instrument, warn};
 
 pub(super) fn parse_attribute(s: &str) -> ParseResult<ProfileAttrBuilder> {
-    let mut parser = Parser {
+    Parser {
         index: 0,
         start: 0,
         source: s,
-    };
-    parser.parse()
+    }
+    .parse()
 }
 
 struct Parser<'a> {
@@ -18,13 +19,42 @@ struct Parser<'a> {
     source: &'a str,
 }
 
-type ParseResult<T> = Result<T, String>;
+type ParseResult<'a, T> = Result<T, ParseError<'a>>;
 
 enum Value<'a> {
     String(&'a str),
     True,
     False,
 }
+
+mod error {
+    use thisctx::WithContext;
+    use thiserror::Error;
+
+    #[derive(Debug, Error, WithContext)]
+    #[thisctx(suffix(false))]
+    pub(crate) enum ParseError<'a> {
+        #[error("a path can't start with a prefix")]
+        PathStartsWithPrefix,
+        #[error("unexpected end of string")]
+        UnexpectedEos,
+        #[error("unexpected char '{0}'")]
+        UnexpectedCharater(#[thisctx(generic(false))] char),
+        #[error("unterminated string")]
+        UnterminatedString,
+        #[error("unexpected identifier '{0}'")]
+        UnexpectedIdentifier(&'a str),
+        #[error("value of '{0}' cannot be a {1}")]
+        UnexpectedValueType(&'static str, &'static str),
+        #[error("duplicate '{0}' attribute")]
+        DuplicateAttribute(&'static str),
+        #[error("unterminated angle bracket")]
+        UnterminatedAngleBracket,
+        #[error("invalid type '{0}'")]
+        InvalidType(&'a str),
+    }
+}
+pub(crate) use error::ParseError;
 
 macro_rules! ident_start {
     () => {
@@ -53,6 +83,10 @@ impl<'a> Parser<'a> {
         self.source.as_bytes().get(i).copied()
     }
 
+    fn last_char(&self) -> char {
+        self.char_at(self.index - 1).unwrap_unreachable2()
+    }
+
     fn char_at(&self, i: usize) -> Option<char> {
         self.source.get(i..).unwrap_unreachable2().chars().next()
     }
@@ -71,7 +105,7 @@ impl<'a> Parser<'a> {
     }
 
     #[instrument(skip_all)]
-    fn parse(&mut self) -> ParseResult<ProfileAttrBuilder> {
+    fn parse(&mut self) -> ParseResult<'a, ProfileAttrBuilder> {
         self.skip_spaces();
         if !matches!(self.next(), Some(b'<')) {
             Ok(path_only_attr(normalize_path(self.source)?))
@@ -80,7 +114,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_xml_like(&mut self) -> ParseResult<ProfileAttrBuilder> {
+    fn parse_xml_like(&mut self) -> ParseResult<'a, ProfileAttrBuilder> {
         let mut attr = ProfileAttrBuilder::default();
 
         self.skip_spaces();
@@ -90,7 +124,7 @@ impl<'a> Parser<'a> {
             "copy" => attr.ty = Some(AttrType::Copy),
             "link" => attr.ty = Some(AttrType::Link),
             "template" => attr.ty = Some(AttrType::Template),
-            ty => return Err(format!("invalid type '{ty}'")),
+            ty => return error::InvalidType(ty).fail(),
         }
 
         loop {
@@ -100,19 +134,19 @@ impl<'a> Parser<'a> {
                 Some(ch) => match ch {
                     ident_start!() => self.next_attribute(&mut attr)?,
                     b'>' => break,
-                    _ => return Err(self.unexpected_char(self.index)),
+                    _ => return error::UnexpectedCharater(self.last_char()).fail(),
                 },
-                None => return Err("unterminated angle brackets".to_owned()),
+                None => return error::UnterminatedAngleBracket.fail(),
             }
         }
         Ok(attr)
     }
 
-    fn next_attribute(&mut self, attr: &mut ProfileAttrBuilder) -> ParseResult<()> {
+    fn next_attribute(&mut self, attr: &mut ProfileAttrBuilder) -> ParseResult<'a, ()> {
         macro_rules! check_dup {
             ($name:ident) => {
                 if attr.$name.is_some() {
-                    return Err(format!("duplicate '{}' attribute", stringify!($name)));
+                    return error::DuplicateAttribute(stringify!($name)).fail();
                 }
             };
         }
@@ -132,7 +166,7 @@ impl<'a> Parser<'a> {
                 match val {
                     Value::True => attr.recursive = Some(true),
                     Value::False => attr.recursive = Some(false),
-                    _ => return Err("value of 'recursive' must be a bool".to_owned()),
+                    _ => return error::UnexpectedValueType("recursive", "bool").fail(),
                 }
             }
             "source" => {
@@ -140,7 +174,7 @@ impl<'a> Parser<'a> {
                 if let Value::String(s) = val {
                     attr.source = Some(normalize_path(s)?)
                 } else {
-                    return Err("value of 'source' must be a string".to_owned());
+                    return error::UnexpectedValueType("source", "string").fail();
                 }
             }
             _ => warn!("Undefined attribute '{}'", key),
@@ -156,7 +190,7 @@ impl<'a> Parser<'a> {
         self.buf_end()
     }
 
-    fn next_value(&mut self) -> ParseResult<Value<'a>> {
+    fn next_value(&mut self) -> ParseResult<'a, Value<'a>> {
         self.buf_start();
         match self.next() {
             Some(ch) => match ch {
@@ -164,22 +198,22 @@ impl<'a> Parser<'a> {
                 ident_start!() => match self.next_ident() {
                     "true" => Ok(Value::True),
                     "false" => Ok(Value::False),
-                    ident => Err(format!("unexpected identifier '{}'", ident)),
+                    ident => error::UnexpectedIdentifier(ident).fail(),
                 },
-                _ => Err(self.unexpected_char(self.index - 1)),
+                _ => error::UnexpectedCharater(self.last_char()).fail(),
             },
-            None => Err(self.unexpected_eos()),
+            None => error::UnexpectedEos.fail(),
         }
     }
 
-    fn next_string(&mut self) -> ParseResult<&'a str> {
+    fn next_string(&mut self) -> ParseResult<'a, &'a str> {
         self.buf_start();
         while let Some(ch) = self.next() {
             if ch == b'"' {
                 return Ok(self.buf_to(self.index - 1));
             }
         }
-        Err("unterminated string".to_owned())
+        error::UnexpectedEos.fail()
     }
 
     fn skip_spaces(&mut self) {
@@ -188,33 +222,21 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect(&mut self, check: impl FnOnce(u8) -> bool) -> ParseResult<()> {
+    fn expect(&mut self, check: impl FnOnce(u8) -> bool) -> ParseResult<'a, ()> {
         match self.next() {
             Some(ch) => {
                 if check(ch) {
                     Ok(())
                 } else {
-                    Err(self.unexpected_char(self.index - 1))
+                    error::UnexpectedCharater(self.last_char()).fail()
                 }
             }
-            None => Err(self.unexpected_eos()),
+            None => error::UnexpectedEos.fail(),
         }
-    }
-
-    fn unexpected_char(&self, at: usize) -> String {
-        format!(
-            "unexpected character '{}' at {}",
-            self.char_at(at).unwrap_unreachable2(),
-            self.index,
-        )
-    }
-
-    fn unexpected_eos(&self) -> String {
-        "unexpected end of string".to_owned()
     }
 }
 
-pub fn normalize_path(path: &str) -> ParseResult<PathBuf> {
+pub(super) fn normalize_path(path: &str) -> ParseResult<PathBuf> {
     let mut buf = PathBuf::new();
     for compo in path.as_ref2::<Path>().components() {
         match compo {
@@ -222,7 +244,7 @@ pub fn normalize_path(path: &str) -> ParseResult<PathBuf> {
             Component::ParentDir => {
                 buf.pop();
             }
-            Component::Prefix(_) => return Err("a path can't start with a prefix".to_owned()),
+            Component::Prefix(_) => return error::PathStartsWithPrefix.fail(),
             _ => buf.push(compo),
         }
     }

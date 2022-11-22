@@ -5,8 +5,9 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error, WithContext)]
-#[thisctx(visibility(pub(crate)))]
 #[thisctx(attr(derive(Debug)))]
+#[thisctx(visibility(pub(crate)))]
+#[thisctx(suffix(false))]
 pub enum Error {
     #[error("A linked or template file cannot have children: '{0}'")]
     UnexpectedChildren(PathBuf),

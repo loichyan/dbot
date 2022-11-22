@@ -23,10 +23,10 @@ impl Renderer {
     }
 
     pub fn render(&mut self, path: &Path) -> error::Result<String> {
-        let content = std::fs::read_to_string(path).context(error::IoFailedContext { path })?;
+        let content = std::fs::read_to_string(path).context(error::IoFailed { path })?;
         self.tera
             .render_str(&content, &self.context)
-            .context(error::InvalidTemplateContext { path })
+            .context(error::InvalidTemplate { path })
     }
 }
 
