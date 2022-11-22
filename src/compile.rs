@@ -97,7 +97,6 @@ fn compile_entry(
 mod tests {
     use super::*;
     use crate::profile::Profile;
-    use dotfish::DotFish;
     use std::path::Path;
 
     fn compile_str(source: &Path, profile: &str) -> error::Result<CompiledEntries> {
@@ -133,7 +132,7 @@ mod tests {
             .iter()
             .map(|filename| {
                 (
-                    "~/path/to/target".as_ref2::<Path>().join(filename),
+                    Path::new("~/path/to/target").join(filename),
                     CompiledProfile {
                         source: tmp.join("path/to/source").join(filename),
                         ty,

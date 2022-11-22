@@ -1,5 +1,4 @@
 use crate::{compile::CompiledEntries, error, profile::AttrType, template::Renderer};
-use dotfish::DotFish;
 use std::path::Path;
 use thisctx::WithContext;
 
@@ -28,11 +27,11 @@ pub fn apply(renderer: &mut Renderer, entries: &CompiledEntries) -> error::Resul
                     path: &profile.source,
                 })?;
             }
-            AttrType::Copy => std::fs::copy(&profile.source, target)
-                .context(error::IoFailed {
+            AttrType::Copy => {
+                std::fs::copy(&profile.source, target).context(error::IoFailed {
                     path: &profile.source,
-                })?
-                .ignore2(),
+                })?;
+            }
             AttrType::Link => create_symlink(&profile.source, target)?,
         }
     }
