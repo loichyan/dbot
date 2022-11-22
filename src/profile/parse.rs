@@ -1,5 +1,4 @@
 use super::{path_only_attr, AttrType, ProfileAttrBuilder};
-use dotfish::DotFish;
 use std::path::{Component, Path, PathBuf};
 use thisctx::IntoError;
 use tracing::{instrument, warn};
@@ -72,7 +71,9 @@ impl<'a> Parser<'a> {
     }
 
     fn buf_to(&self, end: usize) -> &'a str {
-        self.source.get(self.start..end).unwrap_unreachable2()
+        self.source
+            .get(self.start..end)
+            .unwrap_or_else(|| unreachable!())
     }
 
     fn byte(&self) -> Option<u8> {
@@ -84,11 +85,16 @@ impl<'a> Parser<'a> {
     }
 
     fn last_char(&self) -> char {
-        self.char_at(self.index - 1).unwrap_unreachable2()
+        self.char_at(self.index - 1)
+            .unwrap_or_else(|| unreachable!())
     }
 
     fn char_at(&self, i: usize) -> Option<char> {
-        self.source.get(i..).unwrap_unreachable2().chars().next()
+        self.source
+            .get(i..)
+            .unwrap_or_else(|| unreachable!())
+            .chars()
+            .next()
     }
 
     fn next(&mut self) -> Option<u8> {
@@ -238,7 +244,7 @@ impl<'a> Parser<'a> {
 
 pub(super) fn normalize_path(path: &str) -> ParseResult<PathBuf> {
     let mut buf = PathBuf::new();
-    for compo in path.as_ref2::<Path>().components() {
+    for compo in Path::new(path).components() {
         match compo {
             Component::CurDir | Component::RootDir => (),
             Component::ParentDir => {
