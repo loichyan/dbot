@@ -6,8 +6,7 @@ use thisctx::WithContext;
 fn create_symlink(original: &Path, link: &Path) -> error::Result<()> {
     #[cfg(unix)]
     {
-        std::os::unix::fs::symlink(original, link)
-            .context(error::IoFailedContext { path: original })?;
+        std::os::unix::fs::symlink(original, link).context(error::IoFailed { path: original })?;
     }
     #[cfg(not(unix))]
     {
@@ -20,17 +19,17 @@ fn create_symlink(original: &Path, link: &Path) -> error::Result<()> {
 pub fn apply(renderer: &mut Renderer, entries: &CompiledEntries) -> error::Result<()> {
     for (target, profile) in entries.iter() {
         if let Some(dir) = target.parent() {
-            std::fs::create_dir_all(dir).context(error::IoFailedContext { path: dir })?;
+            std::fs::create_dir_all(dir).context(error::IoFailed { path: dir })?;
         }
         match profile.ty {
             AttrType::Template => {
                 let content = renderer.render(&profile.source)?;
-                std::fs::write(target, content).context(error::IoFailedContext {
+                std::fs::write(target, content).context(error::IoFailed {
                     path: &profile.source,
                 })?;
             }
             AttrType::Copy => std::fs::copy(&profile.source, target)
-                .context(error::IoFailedContext {
+                .context(error::IoFailed {
                     path: &profile.source,
                 })?
                 .ignore2(),

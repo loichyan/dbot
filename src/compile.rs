@@ -3,7 +3,7 @@ use crate::{
     profile::{AttrType, Profile, ProfileAttr},
 };
 use std::{collections::HashMap, path::PathBuf};
-use thisctx::WithContext;
+use thisctx::{IntoError, WithContext};
 
 pub type CompiledEntries = HashMap<PathBuf, CompiledProfile>;
 
@@ -25,7 +25,7 @@ pub fn compile(options: &CompilerOptions, profile: Profile) -> error::Result<Com
     // Compile child targets first to avoid double compiling.
     for (target, attr) in entries.into_iter().rev() {
         if cfg!(not(unix)) && matches!(attr.ty, AttrType::Link) {
-            return None.context(error::UnsupportedSymlinksContext(attr.source));
+            return error::UnsupportedSymlinks(attr.source).fail();
         }
         compile_entry(
             options.target.join(&target),
@@ -54,18 +54,16 @@ fn compile_entry(
     // 2) Resolve symlink.
     let metadata = source
         .metadata()
-        .context(error::IoFailedContext { path: &source })?;
+        .context(error::IoFailed { path: &source })?;
     if metadata.is_symlink() {
-        source = std::fs::read_link(&source).context(error::IoFailedContext { path: &source })?;
+        source = std::fs::read_link(&source).context(error::IoFailed { path: &source })?;
     }
 
     // 3) Recursive compile entries under a directory.
     if metadata.is_dir() {
         if recursive {
-            for entry in
-                std::fs::read_dir(&source).context(error::IoFailedContext { path: &source })?
-            {
-                let entry = entry.context(error::IoFailedContext { path: &source })?;
+            for entry in std::fs::read_dir(&source).context(error::IoFailed { path: &source })? {
+                let entry = entry.context(error::IoFailed { path: &source })?;
                 let filename = entry.file_name();
                 if attr.ignore.is_match(&filename) {
                     continue;
@@ -80,7 +78,7 @@ fn compile_entry(
             }
             return Ok(());
         } else if attr.ty == AttrType::Template {
-            return ().context(error::UnexpectedDirectoryForTemplateContext(source));
+            return error::UnexpectedDirectoryForTemplate(source).fail();
         }
     }
 

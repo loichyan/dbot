@@ -12,7 +12,7 @@ use std::{
     path::{Component, Path, PathBuf},
     rc::Rc,
 };
-use thisctx::WithContext;
+use thisctx::{IntoError, WithContext};
 
 pub type ProfileEntries = Vec<(PathBuf, ProfileAttr)>;
 
@@ -68,7 +68,7 @@ fn collect_entries_from_node(
         && !matches!(attr.recursive, Some(true))
         && !children.is_empty()
     {
-        return ().context(error::UnexpectedChildrenContext(full_target));
+        return error::UnexpectedChildren(full_target).fail();
     }
 
     // 3) Collect from child nodes.
@@ -178,7 +178,7 @@ impl ProfileAttrBuilder {
                     Some(builder) => builder
                         .build()
                         .ok()
-                        .context(error::InvalidPatternSetContext(target))?,
+                        .context(error::InvalidPatternSet(target))?,
                     None => <_>::default(),
                 },
             }))
