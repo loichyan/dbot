@@ -200,7 +200,8 @@ impl<'a> Parser<'a> {
         self.buf_start();
         match self.next() {
             Some(ch) => match ch {
-                b'"' => self.next_string().map(Value::String),
+                b'"' => self.next_string(b'"').map(Value::String),
+                b'\'' => self.next_string(b'\'').map(Value::String),
                 ident_start!() => match self.next_ident() {
                     "true" => Ok(Value::True),
                     "false" => Ok(Value::False),
@@ -212,10 +213,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn next_string(&mut self) -> ParseResult<'a, &'a str> {
+    fn next_string(&mut self, quote: u8) -> ParseResult<'a, &'a str> {
         self.buf_start();
         while let Some(ch) = self.next() {
-            if ch == b'"' {
+            if ch == quote {
                 return Ok(self.buf_to(self.index - 1));
             }
         }
@@ -343,6 +344,10 @@ mod test {
 
         assert_eq!(
             parse_attribute(r#"<link source="path/to/source">"#).unwrap(),
+            expect_link_and_source("path/to/source")
+        );
+        assert_eq!(
+            parse_attribute(r#"<link source='path/to/source'>"#).unwrap(),
             expect_link_and_source("path/to/source")
         );
     }
