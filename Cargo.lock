@@ -79,7 +79,6 @@ dependencies = [
 name = "dbot"
 version = "0.0.0"
 dependencies = [
- "dotfish",
  "globset",
  "once_cell",
  "serde",
@@ -101,11 +100,6 @@ dependencies = [
  "block-buffer",
  "crypto-common",
 ]
-
-[[package]]
-name = "dotfish"
-version = "0.0.0"
-source = "git+https://github.com/loichyan/dotfish#16bbf7b4645909ab7b1d289d26e10d79ea3fde7d"
 
 [[package]]
 name = "fastrand"
