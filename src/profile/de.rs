@@ -27,7 +27,6 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
         E: DeError,
     {
         Ok(ProfileNode {
-            // TODO: no complex syntax
             attr: parse_attribute(v).map_err(E::custom)?,
             ..Default::default()
         })

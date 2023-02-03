@@ -273,6 +273,7 @@ impl Merge for ProfileNode {
     }
 }
 
+#[allow(dead_code)]
 fn path_only_attr<T>(source: T) -> ProfileAttrBuilder
 where
     T: Into<PathBuf>,
