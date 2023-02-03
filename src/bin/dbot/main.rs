@@ -117,6 +117,7 @@ impl Runtime {
     }
 
     fn apply(&mut self) -> error::Result<()> {
+        // TODO: remove files on conflicts
         self.clean()?;
         let options = self.options()?;
         let source = options.source();

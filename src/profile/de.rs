@@ -40,8 +40,7 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
         let mut attr = ProfileAttrBuilder::default();
         let mut children = HashMap::with_capacity(map.size_hint().unwrap_or_default());
         while let Some(key) = map.next_key::<&str>()? {
-            // TODO: use '$' instead
-            if let Some(attr_str) = key.strip_prefix('~') {
+            if let Some(attr_str) = key.strip_prefix('+') {
                 match attr_str {
                     "source" => attr.source = Some(deserialize_path_normalized(map.next_value()?)?),
                     "type" => attr.ty = Some(map.next_value()?),
