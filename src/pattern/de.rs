@@ -47,10 +47,7 @@ impl<'de> Visitor<'de> for PatternSetVisitor {
         E: serde::de::Error,
     {
         let pat = PatternVisitor.visit_str(v)?;
-        Ok(PatternSetBuilder {
-            builder: vec![pat.0],
-            ..Default::default()
-        })
+        Ok(PatternSetBuilder { globs: vec![pat.0] })
     }
 
     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
@@ -61,10 +58,7 @@ impl<'de> Visitor<'de> for PatternSetVisitor {
         while let Some(pat) = seq.next_element::<Pattern>()? {
             builder.push(pat.0);
         }
-        Ok(PatternSetBuilder {
-            builder,
-            ..Default::default()
-        })
+        Ok(PatternSetBuilder { globs: builder })
     }
 }
 

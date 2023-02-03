@@ -3,9 +3,11 @@ mod parse;
 
 use crate::{
     error,
+    merge::Merge,
     pattern::{PatternSet, PatternSetBuilder},
 };
-use serde::Deserialize;
+use once_cell::sync::OnceCell;
+use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
     ffi::OsStr,
@@ -14,7 +16,18 @@ use std::{
 };
 use thisctx::{IntoError, WithContext};
 
-pub type ProfileEntries = Vec<(PathBuf, ProfileAttr)>;
+fn rc_unwrap_or_clone<T: Clone>(rc: Rc<T>) -> T {
+    Rc::try_unwrap(rc).unwrap_or_else(|rc| (*rc).clone())
+}
+
+fn extend_set_build(
+    this: Rc<CachedPatternSetBuilder>,
+    parent: &CachedPatternSetBuilder,
+) -> Rc<CachedPatternSetBuilder> {
+    let mut this = rc_unwrap_or_clone(this);
+    this.builder.extend(parent.builder.iter().cloned());
+    Rc::new(this)
+}
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(transparent)]
@@ -22,9 +35,19 @@ pub struct Profile {
     root: ProfileNode,
 }
 
+#[derive(Debug)]
+#[cfg_attr(test, derive(Eq, PartialEq))]
+pub struct ProfileEntries(pub(crate) Vec<(PathBuf, ProfileAttr)>);
+
+impl Merge for Profile {
+    fn merge(&mut self, other: Profile) {
+        self.root.merge(other.root);
+    }
+}
+
 impl Profile {
     pub fn into_entries(mut self) -> error::Result<ProfileEntries> {
-        let mut collect_to = ProfileEntries::default();
+        let mut collect_to = ProfileEntries(<_>::default());
         let node = self.build_component_tree();
         collect_entries_from_node(
             "".as_ref(),
@@ -33,7 +56,7 @@ impl Profile {
             &<_>::default(),
             &mut collect_to,
         )?;
-        collect_to.sort_by(|(a, _), (b, _)| a.cmp(b));
+        collect_to.0.sort_by(|(a, _), (b, _)| a.cmp(b));
         Ok(collect_to)
     }
 
@@ -85,7 +108,7 @@ fn collect_entries_from_node(
     // 4) Build attribute and collect to entries.
     // Ignore entries without `source` attribute.
     if let Some(attr) = attr.build(&full_target)? {
-        collect_to.push((full_target, attr));
+        collect_to.0.push((full_target, attr));
     }
     Ok(())
 }
@@ -107,7 +130,7 @@ fn inherit_attr(
     let recursive = attr.recursive.or(parent.recursive);
     // Attributes to extend.
     let ignore = match (attr.ignore, parent.ignore.clone()) {
-        (Some(this), Some(parent)) => Some(Rc::new(parent.extend(&this))),
+        (Some(this), Some(parent)) => Some(extend_set_build(this, &parent)),
         (Some(val), _) | (_, Some(val)) => Some(val),
         _ => None,
     };
@@ -131,26 +154,35 @@ fn update_component_tree<'a>(
             _ => unreachable!(),
         }
     }
-    merge_attr(&mut tree.attr, std::mem::take(&mut node.attr));
+    tree.attr.merge(std::mem::take(&mut node.attr));
     for (child_target, child_node) in node.children.iter_mut() {
         update_component_tree(child_target, child_node, tree);
     }
 }
 
-/// Merges attributes of `src` into `dest`.
-fn merge_attr(dest: &mut ProfileAttrBuilder, src: ProfileAttrBuilder) {
-    macro_rules! merge_attr_fields {
-        ($($field:ident),*) => {
-            // Ensures fields are exhausted.
-            const _: () = {
-                ProfileAttrBuilder {
-                    $($field: None,)*
-                };
-            };
-            $(src.$field.map(|v| dest.$field.insert(v));)*
-        };
+impl Merge for ProfileAttrBuilder {
+    fn merge(&mut self, other: ProfileAttrBuilder) {
+        macro_rules! merge_field {
+            ($($field:ident),*) => {$(
+                self.$field.merge(other.$field);
+            )*};
+        }
+        merge_field!(source, ty, recursive);
+        if let Some(other) = other.ignore {
+            if !other.builder.is_empty() {
+                let mut this = self
+                    .ignore
+                    .take()
+                    .map(rc_unwrap_or_clone)
+                    .unwrap_or_default();
+                match Rc::try_unwrap(other) {
+                    Ok(t) => this.builder.extend(t.builder.into_iter()),
+                    Err(rc) => this.builder.extend(rc.builder.iter().cloned()),
+                }
+                self.ignore = Some(Rc::new(this));
+            }
+        }
     }
-    merge_attr_fields!(source, ty, recursive, ignore);
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -158,7 +190,32 @@ struct ProfileAttrBuilder {
     source: Option<PathBuf>,
     ty: Option<AttrType>,
     recursive: Option<bool>,
-    ignore: Option<Rc<PatternSetBuilder>>,
+    ignore: Option<Rc<CachedPatternSetBuilder>>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(transparent)]
+struct CachedPatternSetBuilder {
+    builder: PatternSetBuilder,
+    #[serde(skip)]
+    cache: OnceCell<Rc<PatternSet>>,
+}
+
+impl PartialEq for CachedPatternSetBuilder {
+    fn eq(&self, other: &Self) -> bool {
+        self.builder.eq(&other.builder)
+    }
+}
+
+impl Eq for CachedPatternSetBuilder {}
+
+impl CachedPatternSetBuilder {
+    fn build(&self) -> Option<Rc<PatternSet>> {
+        self.cache
+            .get_or_try_init(|| self.builder.build().map(Rc::new))
+            .cloned()
+            .ok()
+    }
 }
 
 impl ProfileAttrBuilder {
@@ -175,10 +232,7 @@ impl ProfileAttrBuilder {
                 ty: ty.unwrap_or_default(),
                 recursive: recursive.unwrap_or_default(),
                 ignore: match ignore {
-                    Some(builder) => builder
-                        .build()
-                        .ok()
-                        .context(error::InvalidPatternSet(target))?,
+                    Some(builder) => builder.build().context(error::InvalidPatternSet(target))?,
                     None => <_>::default(),
                 },
             }))
@@ -188,8 +242,8 @@ impl ProfileAttrBuilder {
     }
 }
 
-#[cfg_attr(test, derive(Eq, PartialEq,))]
 #[derive(Clone, Debug)]
+#[cfg_attr(test, derive(Eq, PartialEq,))]
 pub struct ProfileAttr {
     pub source: PathBuf,
     pub ty: AttrType,
@@ -197,7 +251,7 @@ pub struct ProfileAttr {
     pub ignore: Rc<PatternSet>,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(expecting = "a type attribute", rename_all = "lowercase")]
 pub enum AttrType {
     #[default]
@@ -209,7 +263,14 @@ pub enum AttrType {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ProfileNode {
     attr: ProfileAttrBuilder,
-    children: Vec<(PathBuf, ProfileNode)>,
+    children: HashMap<PathBuf, ProfileNode>,
+}
+
+impl Merge for ProfileNode {
+    fn merge(&mut self, other: Self) {
+        self.attr.merge(other.attr);
+        self.children.merge(other.children);
+    }
 }
 
 fn path_only_attr<T>(source: T) -> ProfileAttrBuilder
@@ -228,6 +289,7 @@ struct ComponentNode<'a> {
     children: HashMap<&'a OsStr, ComponentNode<'a>>,
 }
 
+// TODO: test merge and inherit ignore patterns
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -335,22 +397,24 @@ mod tests {
         )
         .into_entries()
         .unwrap();
-        let expected = [
-            ("path/to/target1", "path/to/source1"),
-            ("path/to/target2", "path/to/source2"),
-            ("path/to/target3", "path/to/source3"),
-        ]
-        .into_iter()
-        .map(|(target, source)| {
-            (
-                PathBuf::from(target),
-                path_only_attr(source)
-                    .build(target.as_ref())
-                    .unwrap()
-                    .unwrap(),
-            )
-        })
-        .collect::<Vec<_>>();
+        let expected = ProfileEntries(
+            [
+                ("path/to/target1", "path/to/source1"),
+                ("path/to/target2", "path/to/source2"),
+                ("path/to/target3", "path/to/source3"),
+            ]
+            .into_iter()
+            .map(|(target, source)| {
+                (
+                    PathBuf::from(target),
+                    path_only_attr(source)
+                        .build(target.as_ref())
+                        .unwrap()
+                        .unwrap(),
+                )
+            })
+            .collect(),
+        );
         assert_eq!(entries, expected);
     }
 
@@ -367,22 +431,24 @@ mod tests {
         )
         .into_entries()
         .unwrap();
-        let mut expected = [
-            ("path/to/target", "path/to/source"),
-            ("path/to/target/child1", "path/to/child1"),
-        ]
-        .into_iter()
-        .map(|(target, source)| {
-            (
-                PathBuf::from(target),
-                path_only_attr(source)
-                    .build(target.as_ref())
-                    .unwrap()
-                    .unwrap(),
-            )
-        })
-        .collect::<Vec<_>>();
-        expected.push((
+        let mut expected = ProfileEntries(
+            [
+                ("path/to/target", "path/to/source"),
+                ("path/to/target/child1", "path/to/child1"),
+            ]
+            .into_iter()
+            .map(|(target, source)| {
+                (
+                    PathBuf::from(target),
+                    path_only_attr(source)
+                        .build(target.as_ref())
+                        .unwrap()
+                        .unwrap(),
+                )
+            })
+            .collect(),
+        );
+        expected.0.push((
             "path/to/target/child2".into(),
             ProfileAttr {
                 source: "path/to/source/child2".into(),

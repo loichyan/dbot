@@ -1,46 +1,38 @@
 mod de;
 
 use globset::{Glob, GlobSet, GlobSetBuilder};
-use once_cell::sync::OnceCell;
-use std::{path::Path, rc::Rc};
+use std::path::Path;
 
-#[derive(Clone, Debug, Default)]
-pub struct PatternSetBuilder {
-    builder: Vec<Glob>,
-    set: OnceCell<Rc<PatternSet>>,
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(crate) struct PatternSetBuilder {
+    globs: Vec<Glob>,
 }
-
-impl PartialEq for PatternSetBuilder {
-    fn eq(&self, other: &Self) -> bool {
-        self.builder.eq(&other.builder)
-    }
-}
-
-impl Eq for PatternSetBuilder {}
 
 impl PatternSetBuilder {
-    pub fn extend(&self, other: &PatternSetBuilder) -> PatternSetBuilder {
-        Self {
-            builder: self
-                .builder
-                .iter()
-                .cloned()
-                .chain(other.builder.iter().cloned())
-                .collect(),
-            set: <_>::default(),
-        }
+    pub fn iter(&self) -> impl Iterator<Item = &Glob> {
+        self.globs.iter()
     }
 
-    pub fn build(&self) -> Result<Rc<PatternSet>, globset::Error> {
-        self.set
-            .get_or_try_init(|| {
-                let mut builder = GlobSetBuilder::new();
-                for pat in self.builder.iter().cloned() {
-                    builder.add(pat);
-                }
-                builder.build().map(PatternSet).map(Rc::new)
-            })
-            .cloned()
+    pub fn into_iter(self) -> impl Iterator<Item = Glob> {
+        self.globs.into_iter()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.globs.is_empty()
+    }
+
+    pub fn build(&self) -> Result<PatternSet, globset::Error> {
+        let mut builder = GlobSetBuilder::new();
+        for pat in self.globs.iter().cloned() {
+            builder.add(pat);
+        }
+        builder.build().map(PatternSet)
+    }
+}
+
+impl Extend<Glob> for PatternSetBuilder {
+    fn extend<T: IntoIterator<Item = Glob>>(&mut self, iter: T) {
+        self.globs.extend(iter);
     }
 }
 

@@ -1,44 +1,44 @@
-use crate::error;
+use dbot::TemplateRenderer;
 use serde::Serialize;
-use std::path::Path;
 use tera::{Context, Tera};
-use thisctx::WithContext;
 
 #[derive(Default)]
-pub struct Renderer {
+pub struct TeraRenderer {
     tera: Tera,
     context: Context,
 }
 
-impl Renderer {
-    pub fn new() -> Self {
-        <_>::default()
-    }
+impl TemplateRenderer for TeraRenderer {
+    type Err = tera::Error;
 
+    fn render(&mut self, s: &str) -> Result<String, Self::Err> {
+        self.tera.render_str(s, &self.context)
+    }
+}
+
+impl TeraRenderer {
     pub fn add_data<T>(&mut self, key: impl Into<String>, val: &T)
     where
         T: ?Sized + Serialize,
     {
         self.context.insert(key, val);
     }
-
-    pub fn render(&mut self, path: &Path) -> error::Result<String> {
-        let content = std::fs::read_to_string(path).context(error::IoFailed { path })?;
-        self.tera
-            .render_str(&content, &self.context)
-            .context(error::InvalidTemplate { path })
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
+    use std::{io::Write, path::Path};
     use tempfile::NamedTempFile;
+
+    fn render_path(renderer: &mut TeraRenderer, path: &Path) -> String {
+        let content = std::fs::read_to_string(path).unwrap();
+        renderer.render(&content).unwrap()
+    }
 
     #[test]
     fn render_template() {
-        let mut render = Renderer::default();
+        let mut render = TeraRenderer::default();
         render.add_data(
             "data",
             &serde_yaml::from_str::<serde_yaml::Value>(
@@ -53,6 +53,6 @@ mod tests {
         tempfile
             .write_all("{{ data.key1 }} {{ data.key2 }}".as_bytes())
             .unwrap();
-        assert_eq!(render.render(tempfile.path()).unwrap(), "Hello, DBot!");
+        assert_eq!(render_path(&mut render, tempfile.path()), "Hello, DBot!");
     }
 }

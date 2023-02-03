@@ -1,7 +1,7 @@
 use super::{path_only_attr, AttrType, ProfileAttrBuilder};
 use std::path::{Component, Path, PathBuf};
 use thisctx::IntoError;
-use tracing::{instrument, warn};
+use tracing::warn;
 
 pub(super) fn parse_attribute(s: &str) -> ParseResult<ProfileAttrBuilder> {
     Parser {
@@ -110,7 +110,6 @@ impl<'a> Parser<'a> {
         self.index += 1;
     }
 
-    #[instrument(skip_all)]
     fn parse(&mut self) -> ParseResult<'a, ProfileAttrBuilder> {
         self.skip_spaces();
         if !matches!(self.next(), Some(b'<')) {

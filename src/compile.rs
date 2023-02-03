@@ -1,29 +1,45 @@
 use crate::{
     error,
-    profile::{AttrType, Profile, ProfileAttr},
+    profile::{AttrType, ProfileAttr, ProfileEntries},
 };
-use std::{collections::HashMap, path::PathBuf};
+use serde::{Deserialize, Serialize};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+};
 use thisctx::{IntoError, WithContext};
 
-pub type CompiledEntries = HashMap<PathBuf, CompiledProfile>;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct CompiledProfile {
     pub source: PathBuf,
     pub ty: AttrType,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CompilerOptions {
-    pub source: PathBuf,
-    pub target: PathBuf,
+pub struct CompilerOptions<'a> {
+    pub source: &'a Path,
+    pub target: &'a Path,
 }
 
-pub fn compile(options: &CompilerOptions, profile: Profile) -> error::Result<CompiledEntries> {
-    let entries = profile.into_entries()?;
-    let mut compiled = CompiledEntries::default();
+#[derive(Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct CompiledEntries(pub(crate) HashMap<PathBuf, CompiledProfile>);
+
+impl CompiledEntries {
+    pub fn iter(&self) -> impl Iterator<Item = (&Path, &CompiledProfile)> {
+        self.0
+            .iter()
+            .map(|(path, entries)| (path.as_path(), entries))
+    }
+}
+
+pub fn compile(
+    options: &CompilerOptions,
+    entries: ProfileEntries,
+) -> error::Result<CompiledEntries> {
+    let mut compiled = CompiledEntries(<_>::default());
     // Compile child targets first to avoid double compiling.
-    for (target, attr) in entries.into_iter().rev() {
+    for (target, attr) in entries.0.into_iter().rev() {
         if cfg!(not(unix)) && matches!(attr.ty, AttrType::Link) {
             return error::UnsupportedSymlinks(attr.source).fail();
         }
@@ -47,23 +63,21 @@ fn compile_entry(
     compiled: &mut CompiledEntries,
 ) -> error::Result<()> {
     // 1) Check whether compiled.
-    if compiled.contains_key(&target) {
+    if compiled.0.contains_key(&target) {
         return Ok(());
     }
 
     // 2) Resolve symlink.
-    let metadata = source
-        .metadata()
-        .context(error::IoFailed { path: &source })?;
+    let metadata = source.metadata().context(error::IoFailed(&source))?;
     if metadata.is_symlink() {
-        source = std::fs::read_link(&source).context(error::IoFailed { path: &source })?;
+        source = std::fs::read_link(&source).context(error::IoFailed(&source))?;
     }
 
     // 3) Recursive compile entries under a directory.
     if metadata.is_dir() {
         if recursive {
-            for entry in std::fs::read_dir(&source).context(error::IoFailed { path: &source })? {
-                let entry = entry.context(error::IoFailed { path: &source })?;
+            for entry in std::fs::read_dir(&source).context(error::IoFailed(&source))? {
+                let entry = entry.context(error::IoFailed(&source))?;
                 let filename = entry.file_name();
                 if attr.ignore.is_match(&filename) {
                     continue;
@@ -83,7 +97,7 @@ fn compile_entry(
     }
 
     // 4) Insert current source.
-    compiled.insert(
+    compiled.0.insert(
         target,
         CompiledProfile {
             source,
@@ -103,10 +117,10 @@ mod tests {
         let profile = serde_yaml::from_str::<Profile>(profile).unwrap();
         compile(
             &CompilerOptions {
-                source: source.into(),
-                target: "~".into(),
+                source,
+                target: "~".as_ref(),
             },
-            profile,
+            profile.into_entries().unwrap(),
         )
     }
 
@@ -128,18 +142,20 @@ mod tests {
     }
 
     fn compiled_entries(tmp: &Path, paths: &[&str], ty: AttrType) -> CompiledEntries {
-        paths
-            .iter()
-            .map(|filename| {
-                (
-                    Path::new("~/path/to/target").join(filename),
-                    CompiledProfile {
-                        source: tmp.join("path/to/source").join(filename),
-                        ty,
-                    },
-                )
-            })
-            .collect()
+        CompiledEntries(
+            paths
+                .iter()
+                .map(|filename| {
+                    (
+                        Path::new("~/path/to/target").join(filename),
+                        CompiledProfile {
+                            source: tmp.join("path/to/source").join(filename),
+                            ty,
+                        },
+                    )
+                })
+                .collect(),
+        )
     }
 
     #[test]
@@ -164,20 +180,22 @@ mod tests {
         let entries = compile_str(
             tempdir.path(),
             r#"
-            path/to/target: 
+            path/to/target:
               ~source: path/to/source
               ~type: link
             "#,
         )
         .unwrap();
-        let expected = std::iter::once((
-            "~/path/to/target".into(),
-            CompiledProfile {
-                source: tempdir.path().join("path/to/source"),
-                ty: AttrType::Link,
-            },
-        ))
-        .collect::<CompiledEntries>();
+        let expected = CompiledEntries(
+            std::iter::once((
+                "~/path/to/target".into(),
+                CompiledProfile {
+                    source: tempdir.path().join("path/to/source"),
+                    ty: AttrType::Link,
+                },
+            ))
+            .collect(),
+        );
         assert_eq!(entries, expected);
     }
 
@@ -206,7 +224,7 @@ mod tests {
         let result = compile_str(
             tempdir.path(),
             r#"
-            path/to/target: 
+            path/to/target:
               ~source: path/to/source
               ~type: template
             "#,
@@ -263,7 +281,7 @@ mod tests {
             r#"
             path/to/target:
                 ~source: path/to/source
-                ~ignore: 
+                ~ignore:
                   - ignore*
                   - ignore_dir/*
             "#,
