@@ -1,14 +1,25 @@
 #[macro_use]
 mod utils;
 
+/// Apply profiles to target path.
 mod apply;
-mod compile;
+pub use apply::{apply, TemplateRenderer};
 
-pub mod error;
-pub mod pattern;
-pub mod profile;
-pub mod template;
-
-pub use apply::apply;
+/// Compile profiles.
+pub mod compile;
 pub use compile::compile;
+
+/// Error shared among modules.
+pub mod error;
 pub use error::Error;
+
+/// Helper trait to merge data structures.
+mod merge;
+pub use merge::Merge;
+
+/// Patterns used to match paths.
+mod pattern;
+
+/// Use defined profiles.
+pub mod profile;
+pub use profile::Profile;

@@ -6,8 +6,8 @@ use serde::{
     de::{Error as DeError, Visitor},
     Deserialize,
 };
-use std::{fmt, path::PathBuf, rc::Rc};
-use tracing::{instrument, warn};
+use std::{collections::HashMap, fmt, path::PathBuf, rc::Rc};
+use tracing::warn;
 
 fn deserialize_path_normalized<E: DeError>(v: &str) -> Result<PathBuf, E> {
     normalize_path(v).map_err(E::custom)
@@ -32,15 +32,14 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
         })
     }
 
-    #[instrument(skip_all)]
     fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
     where
         A: serde::de::MapAccess<'de>,
     {
         let mut attr = ProfileAttrBuilder::default();
-        let mut children = Vec::with_capacity(map.size_hint().unwrap_or_default());
+        let mut children = HashMap::with_capacity(map.size_hint().unwrap_or_default());
         while let Some(key) = map.next_key::<&str>()? {
-            if let Some(attr_str) = key.strip_prefix('~') {
+            if let Some(attr_str) = key.strip_prefix('+') {
                 match attr_str {
                     "source" => attr.source = Some(deserialize_path_normalized(map.next_value()?)?),
                     "type" => attr.ty = Some(map.next_value()?),
@@ -54,7 +53,7 @@ impl<'de> Visitor<'de> for ProfileNodeVistor {
             } else {
                 let dest = deserialize_path_normalized(key)?;
                 let node = map.next_value::<ProfileNode>()?;
-                children.push((dest, node));
+                children.insert(dest, node);
             }
         }
         Ok(ProfileNode { attr, children })
@@ -96,7 +95,9 @@ mod tests {
         .unwrap();
         let expected = ProfileNode {
             attr: path_only_attr("path/to/root"),
-            children: vec![("path/to/target1".into(), path_only_node("path/to/source1"))],
+            children: [("path/to/target1".into(), path_only_node("path/to/source1"))]
+                .into_iter()
+                .collect(),
         };
         assert_eq!(node, expected);
     }
@@ -135,10 +136,12 @@ mod tests {
         let child1 = path_only_node("path/to/source1");
         let child2 = path_only_node("path/to/source2");
         let expected = ProfileNode {
-            children: vec![
+            children: [
                 ("target1".to_owned().into(), child1),
                 ("target2".to_owned().into(), child2),
-            ],
+            ]
+            .into_iter()
+            .collect(),
             ..Default::default()
         };
         assert_eq!(node, expected);
