@@ -1,6 +1,11 @@
-# 🤖 DBot (WIP)
+# 🤖 DBot
 
 A simple dotfiles manager written in Rust.
+
+## 📌 Notice
+
+This project is **no longer maintained**, please use
+[chezmoi](https://github.com/twpayne/chezmoi) instead.
 
 ## ⚖️ License
 
