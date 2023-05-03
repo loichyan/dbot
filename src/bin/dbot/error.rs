@@ -5,7 +5,6 @@ use thiserror::Error;
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug, Error, WithContext)]
-#[thisctx(suffix(false))]
 pub enum Error {
     #[error("Can't get standard directories")]
     CannotGetDirectory,

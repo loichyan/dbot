@@ -701,16 +701,18 @@ dependencies = [
 
 [[package]]
 name = "thisctx"
-version = "0.2.0"
-source = "git+https://github.com/loichyan/thisctx#6784fcae193b0014180c2100c332852cc642e7d8"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2d91624b2bfeb95aa44801f7daaa928929d5e9a727ec9b081290519d80fcbead"
 dependencies = [
  "thisctx_impl",
 ]
 
 [[package]]
 name = "thisctx_impl"
-version = "0.2.0"
-source = "git+https://github.com/loichyan/thisctx#6784fcae193b0014180c2100c332852cc642e7d8"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b1d51cadde49cafda283522faf31bc5527b347ced62704e44cf0d24e3f816aa2"
 dependencies = [
  "proc-macro2",
  "quote",

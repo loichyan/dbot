@@ -163,9 +163,9 @@ fn main() -> anyhow::Result<()> {
     // Override default options.
     rt.options_mut()?.merge(args.options);
     match args.cmd {
-        Command::Apply => rt.apply()?,
-        Command::Clean => rt.clean()?,
-        Command::Ls => rt.ls()?,
+        Command::Apply {} => rt.apply()?,
+        Command::Clean {} => rt.clean()?,
+        Command::Ls {} => rt.ls()?,
     }
     Ok(())
 }

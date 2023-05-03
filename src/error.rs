@@ -6,7 +6,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Debug, Error, WithContext)]
-#[thisctx(attr(derive(Debug)), suffix(false), visibility(pub(crate)))]
+#[thisctx(pub(crate), attr(derive(Debug)))]
 pub enum Error {
     #[error("A linked or template file cannot have children at '{0}'")]
     UnexpectedChildren(PathBuf),

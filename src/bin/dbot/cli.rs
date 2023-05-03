@@ -13,9 +13,9 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Clean and create target files.
-    Apply,
+    Apply {},
     /// Remove all target files created last time.
-    Clean,
+    Clean {},
     /// List all managed target files.
-    Ls,
+    Ls {},
 }

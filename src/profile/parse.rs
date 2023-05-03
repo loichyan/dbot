@@ -7,7 +7,6 @@ mod error {
     use thiserror::Error;
 
     #[derive(Debug, Error, WithContext)]
-    #[thisctx(suffix(false))]
     pub(crate) enum Error<'a> {
         #[error("a path can't start with '{0}' or other prefixes")]
         PathStartsWithPrefix(&'a str),
